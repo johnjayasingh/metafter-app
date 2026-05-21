@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "LOCAL (Debug Pre-fill)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main_local.dart"
+    },
+    {
+      "name": "DEV",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main_dev.dart",
+    },
+    {
+      "name": "UAT",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main_uat.dart",
+      "args": [
+        "--flavor",
+        "uat"
+      ]
+    },
+    {
+      "name": "Production",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart"
+    },
+    {
+      "name": "LOCAL Web (Debug Pre-fill)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main_local.dart",
+      "args": [
+        "-d",
+        "chrome"
+      ]
+    },
+  ]
+}

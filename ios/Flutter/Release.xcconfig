@@ -1,0 +1,5 @@
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"
+#include "Generated.xcconfig"
+DISPLAY_NAME = Will Cloud DEV
+PRODUCT_BUNDLE_IDENTIFIER = com.nydco.digitalwill.dev

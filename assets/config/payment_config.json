@@ -1,0 +1,134 @@
+{
+  "dev": {
+    "plans": {
+      "basic": {
+        "name": "Basic",
+        "description": "Just the essentials to get it done.",
+        "price": null,
+        "priceId": "price_1SkP862NO1u7Z8eWmTPQwvxe",
+        "buttonText": "Get started for Free",
+        "features": [
+          "Create your legally valid Will",
+          "Secure document generation",
+          "Encrypted storage"
+        ],
+        "perfectFor": "Simple estates and confident self-starters"
+      },
+      "standard": {
+        "name": "Standard",
+        "description": "Add extra confidence and peace of mind.",
+        "price": "$110",
+        "priceId": "price_1SkPDI2NO1u7Z8eWNYGisj84",
+        "buttonText": "Get started for $110",
+        "features": [
+          "Everything in Basic",
+          "Share with executors and stakeholders",
+          "Manual legal review by our team"
+        ],
+        "perfectFor": "Those who want legal assurance",
+        "isPopular": true
+      },
+      "premium": {
+        "name": "Premium",
+        "description": "The full experience with expert legal backup.",
+        "price": "$340",
+        "priceId": "price_1SkPEL2NO1u7Z8eWARl9JJ3Y",
+        "buttonText": "Get started for $340",
+        "features": [
+          "Everything in Standard",
+          "Full legal review session (asynchronous)",
+          "Enhanced guidance throughout"
+        ],
+        "perfectFor": "Complex family or asset situations"
+      }
+    }
+  },
+  "uat": {
+    "plans": {
+      "basic": {
+        "name": "Basic",
+        "description": "Just the essentials to get it done.",
+        "price": null,
+        "priceId": "price_1SkP862NO1u7Z8eWmTPQwvxe",
+        "buttonText": "Get started for Free",
+        "features": [
+          "Create your legally valid Will",
+          "Secure document generation",
+          "Encrypted storage"
+        ],
+        "perfectFor": "Simple estates and confident self-starters"
+      },
+      "standard": {
+        "name": "Standard",
+        "description": "Add extra confidence and peace of mind.",
+        "price": "$110",
+        "priceId": "price_1SkPDI2NO1u7Z8eWNYGisj84",
+        "buttonText": "Get started for $110",
+        "features": [
+          "Everything in Basic",
+          "Share with executors and stakeholders",
+          "Manual legal review by our team"
+        ],
+        "perfectFor": "Those who want legal assurance",
+        "isPopular": true
+      },
+      "premium": {
+        "name": "Premium",
+        "description": "The full experience with expert legal backup.",
+        "price": "$340",
+        "priceId": "price_1SkPEL2NO1u7Z8eWARl9JJ3Y",
+        "buttonText": "Get started for $340",
+        "features": [
+          "Everything in Standard",
+          "Full legal review session (asynchronous)",
+          "Enhanced guidance throughout"
+        ],
+        "perfectFor": "Complex family or asset situations"
+      }
+    }
+  },
+  "production": {
+    "plans": {
+      "basic": {
+        "name": "Basic",
+        "description": "Just the essentials to get it done.",
+        "price": null,
+        "priceId": "price_1SkP862NO1u7Z8eWmTPQwvxe",
+        "buttonText": "Get started for Free",
+        "features": [
+          "Create your legally valid Will",
+          "Secure document generation",
+          "Encrypted storage"
+        ],
+        "perfectFor": "Simple estates and confident self-starters"
+      },
+      "standard": {
+        "name": "Standard",
+        "description": "Add extra confidence and peace of mind.",
+        "price": "$110",
+        "priceId": "price_1SkPDI2NO1u7Z8eWNYGisj84",
+        "buttonText": "Get started for $110",
+        "features": [
+          "Everything in Basic",
+          "Share with executors and stakeholders",
+          "Manual legal review by our team"
+        ],
+        "perfectFor": "Those who want legal assurance",
+        "isPopular": true
+      },
+      "premium": {
+        "name": "Premium",
+        "description": "The full experience with expert legal backup.",
+        "price": "$340",
+        "priceId": "price_1SkPEL2NO1u7Z8eWARl9JJ3Y",
+        "buttonText": "Get started for $340",
+        "features": [
+          "Everything in Standard",
+          "Full legal review session (asynchronous)",
+          "Enhanced guidance throughout"
+        ],
+        "perfectFor": "Complex family or asset situations"
+      }
+    }
+  }
+}

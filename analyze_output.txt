@@ -1,0 +1,33 @@
+Analyzing digitalwill...                                        
+
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:50:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:51:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:52:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:53:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:54:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:62:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:63:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:71:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:72:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:73:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:75:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:84:9 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:95:9 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:105:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:116:11 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:125:9 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:244:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:245:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:246:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:247:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:248:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:249:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/core/network/api_client.dart:251:7 • avoid_print
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/core/widgets/form/app_checkbox.dart:137:68 • deprecated_member_use
+   info • 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre • lib/core/widgets/form/app_dropdown.dart:150:7 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/core/widgets/form/app_radio_option.dart:282:46 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/core/widgets/form/app_radio_option.dart:399:39 • deprecated_member_use
+   info • Library names are not necessary • lib/core/widgets/form/form_widgets.dart:9:9 • unnecessary_library_name
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/core/widgets/session_timeout_dialog.dart:25:40 • deprecated_member_use
+   info • Unnecessary use of multiple underscores • lib/features/onboarding/presentation/widgets/discover_avatar_collage.dart:83:24 • unnecessary_underscores
+

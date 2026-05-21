@@ -4,7 +4,7 @@
 /// 
 /// Usage:
 /// ```dart
-/// import 'package:digitalwill/core/widgets/form/form_widgets.dart';
+/// import 'package:metafter/core/widgets/form/form_widgets.dart';
 /// ```
 library form_widgets;
 

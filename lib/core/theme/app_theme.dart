@@ -6,6 +6,7 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
+      fontFamily: GoogleFonts.instrumentSans().fontFamily,
       colorScheme: ColorScheme.light(
         primary: AppColors.primaryGreen,
         secondary: AppColors.primaryMint,
@@ -20,52 +21,52 @@ class AppTheme {
       
       // Text theme
       textTheme: TextTheme(
-        displayLarge: GoogleFonts.manrope(
+        displayLarge: GoogleFonts.instrumentSans(
           fontSize: 32,
           fontWeight: FontWeight.bold,
           color: AppColors.textPrimary,
         ),
-        displayMedium: GoogleFonts.manrope(
+        displayMedium: GoogleFonts.instrumentSans(
           fontSize: 28,
           fontWeight: FontWeight.bold,
           color: AppColors.textPrimary,
         ),
-        displaySmall: GoogleFonts.manrope(
+        displaySmall: GoogleFonts.instrumentSans(
           fontSize: 24,
           fontWeight: FontWeight.bold,
           color: AppColors.textPrimary,
         ),
-        headlineMedium: GoogleFonts.manrope(
+        headlineMedium: GoogleFonts.instrumentSans(
           fontSize: 20,
           fontWeight: FontWeight.w600,
           color: AppColors.textPrimary,
         ),
-        headlineSmall: GoogleFonts.manrope(
+        headlineSmall: GoogleFonts.instrumentSans(
           fontSize: 18,
           fontWeight: FontWeight.w600,
           color: AppColors.textPrimary,
         ),
-        titleLarge: GoogleFonts.manrope(
+        titleLarge: GoogleFonts.instrumentSans(
           fontSize: 16,
           fontWeight: FontWeight.w600,
           color: AppColors.textPrimary,
         ),
-        titleMedium: GoogleFonts.manrope(
+        titleMedium: GoogleFonts.instrumentSans(
           fontSize: 14,
           fontWeight: FontWeight.w500,
           color: AppColors.textPrimary,
         ),
-        bodyLarge: GoogleFonts.manrope(
+        bodyLarge: GoogleFonts.instrumentSans(
           fontSize: 16,
           fontWeight: FontWeight.normal,
           color: AppColors.textPrimary,
         ),
-        bodyMedium: GoogleFonts.manrope(
+        bodyMedium: GoogleFonts.instrumentSans(
           fontSize: 14,
           fontWeight: FontWeight.normal,
           color: AppColors.textSecondary,
         ),
-        bodySmall: GoogleFonts.manrope(
+        bodySmall: GoogleFonts.instrumentSans(
           fontSize: 12,
           fontWeight: FontWeight.normal,
           color: AppColors.textTertiary,
@@ -82,7 +83,7 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          textStyle: GoogleFonts.manrope(
+          textStyle: GoogleFonts.instrumentSans(
             fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
@@ -93,7 +94,7 @@ class AppTheme {
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: AppColors.primaryGreen,
-          textStyle: GoogleFonts.manrope(
+          textStyle: GoogleFonts.instrumentSans(
             fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
@@ -128,7 +129,7 @@ class AppTheme {
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         constraints: const BoxConstraints(minHeight: 56, maxHeight: 56),
-        hintStyle: GoogleFonts.manrope(
+        hintStyle: GoogleFonts.instrumentSans(
           fontSize: 14,
           color: AppColors.textTertiary,
         ),
@@ -149,7 +150,7 @@ class AppTheme {
         elevation: 0,
         backgroundColor: Colors.transparent,
         foregroundColor: AppColors.textPrimary,
-        titleTextStyle: GoogleFonts.manrope(
+        titleTextStyle: GoogleFonts.instrumentSans(
           fontSize: 18,
           fontWeight: FontWeight.w600,
           color: AppColors.textPrimary,

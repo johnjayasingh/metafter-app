@@ -9,7 +9,7 @@ class AppTextStyles {
   
   /// Main page title (24px, w600, -0.4 spacing)
   /// Used for: Screen headings, main questions
-  static TextStyle get pageTitle => GoogleFonts.manrope(
+  static TextStyle get pageTitle => GoogleFonts.instrumentSans(
         fontSize: 24,
         fontWeight: FontWeight.w600,
         height: 1.2,
@@ -18,7 +18,7 @@ class AppTextStyles {
       );
 
   /// Page title with custom color
-  static TextStyle pageTitleWithColor(Color color) => GoogleFonts.manrope(
+  static TextStyle pageTitleWithColor(Color color) => GoogleFonts.instrumentSans(
         fontSize: 20,
         fontWeight: FontWeight.w600,
         height: 1.2,
@@ -30,7 +30,7 @@ class AppTextStyles {
   
   /// Section header (18px, w700)
   /// Used for: Bottom sheet titles, modal headers
-  static TextStyle get sectionTitle => GoogleFonts.manrope(
+  static TextStyle get sectionTitle => GoogleFonts.instrumentSans(
         fontSize: 18,
         fontWeight: FontWeight.w700,
         color: AppColors.textPrimary,
@@ -38,7 +38,7 @@ class AppTextStyles {
 
   /// Question title (16px, w600)
   /// Used for: Form questions, card titles
-  static TextStyle get questionTitle => GoogleFonts.manrope(
+  static TextStyle get questionTitle => GoogleFonts.instrumentSans(
         fontSize: 16,
         fontWeight: FontWeight.w600,
         height: 1.5,
@@ -48,7 +48,7 @@ class AppTextStyles {
 
   /// Card title (16px, w600)
   /// Used for: Asset cards, item names
-  static TextStyle get cardTitle => GoogleFonts.manrope(
+  static TextStyle get cardTitle => GoogleFonts.instrumentSans(
         fontSize: 16,
         fontWeight: FontWeight.w600,
         color: AppColors.textPrimary,
@@ -58,7 +58,7 @@ class AppTextStyles {
   
   /// Primary subtitle (12px, w600, 0.18 spacing)
   /// Used for: Page descriptions, help text under titles
-  static TextStyle get subtitle => GoogleFonts.manrope(
+  static TextStyle get subtitle => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w600,
         height: 1.5,
@@ -68,7 +68,7 @@ class AppTextStyles {
 
   /// Secondary subtitle (13px, w400)
   /// Used for: Bottom sheet subtitles, smaller descriptions
-  static TextStyle get subtitleSmall => GoogleFonts.manrope(
+  static TextStyle get subtitleSmall => GoogleFonts.instrumentSans(
         fontSize: 13,
         fontWeight: FontWeight.w400,
         color: AppColors.textSecondary,
@@ -76,7 +76,7 @@ class AppTextStyles {
 
   /// Body text medium (14px, w400)
   /// Used for: General content, descriptions
-  static TextStyle get bodyMedium => GoogleFonts.manrope(
+  static TextStyle get bodyMedium => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w400,
         color: AppColors.textSecondary,
@@ -84,7 +84,7 @@ class AppTextStyles {
 
   /// Body text small (12px, w400)
   /// Used for: Helper text, hints
-  static TextStyle get bodySmall => GoogleFonts.manrope(
+  static TextStyle get bodySmall => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w400,
         color: AppColors.textSecondary,
@@ -92,7 +92,7 @@ class AppTextStyles {
 
   /// Card subtitle (14px, w400)
   /// Used for: Secondary information in cards
-  static TextStyle get cardSubtitle => GoogleFonts.manrope(
+  static TextStyle get cardSubtitle => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w400,
         color: AppColors.textSecondary,
@@ -100,7 +100,7 @@ class AppTextStyles {
 
   /// Bottom navigation tab label - active (12px, w600)
   /// Used for: Active bottom navigation labels
-  static TextStyle get tabLabelActive => GoogleFonts.manrope(
+  static TextStyle get tabLabelActive => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w600,
         color: AppColors.primaryGreen,
@@ -108,7 +108,7 @@ class AppTextStyles {
 
   /// Bottom navigation tab label - inactive (12px, w500)
   /// Used for: Inactive bottom navigation labels
-  static TextStyle get tabLabelInactive => GoogleFonts.manrope(
+  static TextStyle get tabLabelInactive => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w500,
         color: AppColors.textGray,
@@ -118,7 +118,7 @@ class AppTextStyles {
   
   /// Item label (14px, w600)
   /// Used for: List items, selectable options
-  static TextStyle get itemLabel => GoogleFonts.manrope(
+  static TextStyle get itemLabel => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w600,
         color: AppColors.textPrimary,
@@ -126,7 +126,7 @@ class AppTextStyles {
 
   /// Small label (12px, w600)
   /// Used for: Tags, badges, small indicators
-  static TextStyle get labelSmall => GoogleFonts.manrope(
+  static TextStyle get labelSmall => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w600,
         color: AppColors.textSecondary,
@@ -134,14 +134,14 @@ class AppTextStyles {
 
   /// Avatar initials (14px, w600)
   /// Used for: Avatar text, initials
-  static TextStyle get avatarInitials => GoogleFonts.manrope(
+  static TextStyle get avatarInitials => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w600,
         color: AppColors.textPrimary,
       );
 
   /// Avatar initials large (16px, w600)
-  static TextStyle get avatarInitialsLarge => GoogleFonts.manrope(
+  static TextStyle get avatarInitialsLarge => GoogleFonts.instrumentSans(
         fontSize: 16,
         fontWeight: FontWeight.w600,
         color: AppColors.textPrimary,
@@ -151,7 +151,7 @@ class AppTextStyles {
   
   /// Primary button text (16px, w600)
   /// Used for: Main action buttons
-  static TextStyle get buttonPrimary => GoogleFonts.manrope(
+  static TextStyle get buttonPrimary => GoogleFonts.instrumentSans(
         fontSize: 16,
         fontWeight: FontWeight.w600,
         color: AppColors.backgroundWhite,
@@ -159,7 +159,7 @@ class AppTextStyles {
 
   /// Secondary button text (14px, w500)
   /// Used for: Secondary action buttons, Cancel buttons
-  static TextStyle get buttonSecondary => GoogleFonts.manrope(
+  static TextStyle get buttonSecondary => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w500,
         color: AppColors.primaryGreen,
@@ -167,21 +167,21 @@ class AppTextStyles {
 
   /// Small button text (14px, w600)
   /// Used for: Compact buttons, Yes/No options
-  static TextStyle get buttonSmall => GoogleFonts.manrope(
+  static TextStyle get buttonSmall => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w600,
         color: AppColors.textPrimary,
       );
 
   /// Button text with custom color
-  static TextStyle buttonWithColor(Color color) => GoogleFonts.manrope(
+  static TextStyle buttonWithColor(Color color) => GoogleFonts.instrumentSans(
         fontSize: 16,
         fontWeight: FontWeight.w600,
         color: color,
       );
 
   /// Button text disabled
-  static TextStyle get buttonDisabled => GoogleFonts.manrope(
+  static TextStyle get buttonDisabled => GoogleFonts.instrumentSans(
         fontSize: 16,
         fontWeight: FontWeight.w600,
         color: AppColors.textDisabled,
@@ -191,7 +191,7 @@ class AppTextStyles {
   
   /// Step counter (14px, w600)
   /// Used for: "1/5 steps" counter
-  static TextStyle get stepCounter => GoogleFonts.manrope(
+  static TextStyle get stepCounter => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w600,
         height: 1.5,
@@ -201,7 +201,7 @@ class AppTextStyles {
 
   /// Step label (14px, w500)
   /// Used for: "steps" text
-  static TextStyle get stepLabel => GoogleFonts.manrope(
+  static TextStyle get stepLabel => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w500,
         height: 1.5,
@@ -211,7 +211,7 @@ class AppTextStyles {
 
   /// Step title (16px, w600)
   /// Used for: Current step title in app bar
-  static TextStyle get stepTitle => GoogleFonts.manrope(
+  static TextStyle get stepTitle => GoogleFonts.instrumentSans(
         fontSize: 16,
         fontWeight: FontWeight.w600,
         height: 1.5,
@@ -223,7 +223,7 @@ class AppTextStyles {
   
   /// Empty state text (14px, w400, center aligned)
   /// Used for: Empty lists, no data messages
-  static TextStyle get emptyState => GoogleFonts.manrope(
+  static TextStyle get emptyState => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w400,
         color: AppColors.textSecondary,
@@ -231,7 +231,7 @@ class AppTextStyles {
 
   /// Error text (12px, w400)
   /// Used for: Form validation, error messages
-  static TextStyle get error => GoogleFonts.manrope(
+  static TextStyle get error => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w400,
         color: AppColors.error,
@@ -239,7 +239,7 @@ class AppTextStyles {
 
   /// Link text (14px, w600)
   /// Used for: Clickable text, hyperlinks
-  static TextStyle get link => GoogleFonts.manrope(
+  static TextStyle get link => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w600,
         color: AppColors.primaryGreen,
@@ -249,7 +249,7 @@ class AppTextStyles {
   
   /// Text field input style (14px, w500)
   /// Used for: Text input values
-  static TextStyle get inputText => GoogleFonts.manrope(
+  static TextStyle get inputText => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w500,
         color: AppColors.textPrimary,
@@ -257,7 +257,7 @@ class AppTextStyles {
 
   /// Text field label (14px, w400)
   /// Used for: Input labels, floating labels
-  static TextStyle get inputLabel => GoogleFonts.manrope(
+  static TextStyle get inputLabel => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w400,
         color: AppColors.textDisabled,
@@ -265,7 +265,7 @@ class AppTextStyles {
 
   /// Text field external label (14px, w500)
   /// Used for: Labels displayed above input fields
-  static TextStyle get inputLabelExternal => GoogleFonts.manrope(
+  static TextStyle get inputLabelExternal => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w500,
         color: AppColors.textSecondary,
@@ -273,7 +273,7 @@ class AppTextStyles {
 
   /// Text field floating label (12px, w500)
   /// Used for: Elevated/floating labels
-  static TextStyle get inputLabelFloating => GoogleFonts.manrope(
+  static TextStyle get inputLabelFloating => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w500,
         color: AppColors.primaryGreen,
@@ -281,7 +281,7 @@ class AppTextStyles {
 
   /// Text field hint (14px, w400)
   /// Used for: Placeholder text
-  static TextStyle get inputHint => GoogleFonts.manrope(
+  static TextStyle get inputHint => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w400,
         color: AppColors.textDisabled,
@@ -291,7 +291,7 @@ class AppTextStyles {
   
   /// Large welcome title (24px, w600, -0.3 spacing)
   /// Used for: Auth screens, welcome screens
-  static TextStyle get welcomeTitle => GoogleFonts.manrope(
+  static TextStyle get welcomeTitle => GoogleFonts.instrumentSans(
         fontSize: 24,
         fontWeight: FontWeight.w600,
         height: 1.0,
@@ -301,7 +301,7 @@ class AppTextStyles {
 
   /// Onboarding large title (30px, w600, -0.3 spacing)
   /// Used for: Large hero text
-  static TextStyle get onboardingTitle => GoogleFonts.manrope(
+  static TextStyle get onboardingTitle => GoogleFonts.instrumentSans(
         fontSize: 30,
         fontWeight: FontWeight.w600,
         height: 1.0,
@@ -311,7 +311,7 @@ class AppTextStyles {
 
   /// Auth description text (14px, w500, 1.5 height)
   /// Used for: Auth screen descriptions
-  static TextStyle authDescription(BuildContext context) => GoogleFonts.manrope(
+  static TextStyle authDescription(BuildContext context) => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w500,
         height: 1.5,
@@ -323,7 +323,7 @@ class AppTextStyles {
   
   /// Card name/title (14px, w600)
   /// Used for: Name in person cards, asset names
-  static TextStyle get cardName => GoogleFonts.manrope(
+  static TextStyle get cardName => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w600,
         color: AppColors.textPrimary,
@@ -331,7 +331,7 @@ class AppTextStyles {
 
   /// Card secondary text (12px, w500)
   /// Used for: Secondary info in cards
-  static TextStyle get cardSecondary => GoogleFonts.manrope(
+  static TextStyle get cardSecondary => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w500,
         color: AppColors.textSecondary,
@@ -339,7 +339,7 @@ class AppTextStyles {
 
   /// Small instructional text (12px, w600)
   /// Used for: Instructions, small headings in containers
-  static TextStyle get instructionSmall => GoogleFonts.manrope(
+  static TextStyle get instructionSmall => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w600,
         height: 1.5,
@@ -349,7 +349,7 @@ class AppTextStyles {
 
   /// Date/timestamp text (12px, w600)
   /// Used for: Dates, timestamps
-  static TextStyle get timestamp => GoogleFonts.manrope(
+  static TextStyle get timestamp => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w600,
         color: AppColors.textPrimary,
@@ -357,7 +357,7 @@ class AppTextStyles {
 
   /// Timestamp label (12px, w500)
   /// Used for: Date labels like "Created on"
-  static TextStyle get timestampLabel => GoogleFonts.manrope(
+  static TextStyle get timestampLabel => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w500,
         color: AppColors.textGray3,
@@ -365,7 +365,7 @@ class AppTextStyles {
 
   /// Disclaimer/small meta text (10px, w400)
   /// Used for: Disclaimers, IDs, very small text
-  static TextStyle get disclaimer => GoogleFonts.manrope(
+  static TextStyle get disclaimer => GoogleFonts.instrumentSans(
         fontSize: 10,
         fontWeight: FontWeight.w400,
         color: AppColors.textSecondary,
@@ -375,7 +375,7 @@ class AppTextStyles {
   
   /// Step number badge (12px, w600, white)
   /// Used for: Numbered steps in circles
-  static TextStyle get stepNumberBadge => GoogleFonts.manrope(
+  static TextStyle get stepNumberBadge => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w600,
         color: AppColors.backgroundWhite,
@@ -383,7 +383,7 @@ class AppTextStyles {
 
   /// Step instruction text (14px, w500)
   /// Used for: Instruction step descriptions
-  static TextStyle get stepInstruction => GoogleFonts.manrope(
+  static TextStyle get stepInstruction => GoogleFonts.instrumentSans(
         fontSize: 14,
         fontWeight: FontWeight.w500,
         color: AppColors.textPrimary,
@@ -393,7 +393,7 @@ class AppTextStyles {
   
   /// Resend link text (12px, w600, underlined)
   /// Used for: Resend OTP, small action links
-  static TextStyle resendLink(BuildContext context) => GoogleFonts.manrope(
+  static TextStyle resendLink(BuildContext context) => GoogleFonts.instrumentSans(
         fontSize: 12,
         fontWeight: FontWeight.w600,
         color: AppColors.primaryGreen,

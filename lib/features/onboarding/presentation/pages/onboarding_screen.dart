@@ -1,181 +1,111 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter_svg/flutter_svg.dart';
-import 'package:smooth_page_indicator/smooth_page_indicator.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../../../core/theme/app_colors.dart';
-import '../../../../core/widgets/form/form_widgets.dart';
-import '../../../../core/theme/app_text_styles.dart';
-import '../../../../core/theme/app_theme.dart';
-import '../../../../core/constants/app_constants.dart';
+import 'package:google_fonts/google_fonts.dart';
+
 import '../../../../core/routes/app_router.dart';
-import '../../../../core/utils/responsive_utils.dart';
-import '../../data/onboarding_data.dart';
-import '../widgets/onboarding_page_widget.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/metafter_logo.dart';
+import '../widgets/discover_avatar_collage.dart';
 
-class OnboardingScreen extends StatefulWidget {
+class OnboardingScreen extends StatelessWidget {
   const OnboardingScreen({super.key});
-
-  @override
-  State<OnboardingScreen> createState() => _OnboardingScreenState();
-}
-
-class _OnboardingScreenState extends State<OnboardingScreen> {
-  final PageController _pageController = PageController();
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _completeOnboarding() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(AppConstants.keyIsFirstLaunch, false);
-    if (!mounted) return;
-    context.go(AppRouter.signIn);
-  }
-
-  // Uncomment these methods if you want to add Next/Skip buttons
-  // void _nextPage() {
-  //   if (_currentPage < OnboardingData.pages.length - 1) {
-  //     _pageController.nextPage(
-  //       duration: AppConstants.animationDuration,
-  //       curve: Curves.easeInOut,
-  //     );
-  //   } else {
-  //     _completeOnboarding();
-  //   }
-  // }
-
-  // void _skipOnboarding() {
-  //   _completeOnboarding();
-  // }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: AppTheme.primaryGradient,
-        ),
-        child: Container(
-          decoration: const BoxDecoration(
-            image: DecorationImage(
-              image: AssetImage('assets/images/onboarding.png'),
-              fit: BoxFit.cover,
-              opacity: 1.0,
-            ),
-          ),
-          child: SafeArea(
-            child: Column(
-              children: [
-                // Logo, tagline, and description at top (persistent)
-                Padding(
-                  padding: ResponsiveUtils.scaleEdgeInsets(
-                    context,
-                    top: 32,
-                    left: 24,
-                    right: 24,
-                    bottom: 16,
-                  ),
-                  child: Column(
-                    children: [
-                      SvgPicture.asset(
-                        'assets/images/logo.svg',
-                        width: 134.92.scaled(context),
-                        height: 24.scaled(context),
-                      ),
-                      ResponsiveUtils.scaledBox(context, height: 16),
-                      Text(
-                        'Trusted by families\nacross Australia',
-                        style: AppTextStyles.onboardingTitle.copyWith(
-                          fontSize: 30.scaled(context),
-                          letterSpacing: -0.3.scaled(context),
-                          color: AppColors.textBrand,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      ResponsiveUtils.scaledBox(context, height: 12),
-                      Text(
-                        'Protect what matters most with an easy,\nguided will-creation experience.',
-                        style: AppTextStyles.instructionSmall.copyWith(
-                          fontSize: 12.scaled(context),
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: 0.18.scaled(context),
-                          color: AppColors.subscriptionDescription,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            // Red gradient header with logo + avatar collage.
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    stops: [0.0, 0.55, 1.0],
+                    colors: [
+                      AppColors.brandRedDeep,
+                      AppColors.brandRed,
+                      Colors.white,
                     ],
                   ),
                 ),
-                
-                // Page view
-                Expanded(
-                  child: PageView.builder(
-                    controller: _pageController,
-                    onPageChanged: (index) {
-                      // Page changed - could be used for analytics or state tracking
-                    },
-                    itemCount: OnboardingData.pages.length,
-                    itemBuilder: (context, index) {
-                      return OnboardingPageWidget(
-                        page: OnboardingData.pages[index],
-                      );
-                    },
-                  ),
+                child: Column(
+                  children: [
+                    SizedBox(height: MediaQuery.of(context).padding.top + 24),
+                    const MetafterLogo(
+                      variant: MetafterLogoVariant.white,
+                      height: 28,
+                    ),
+                    const Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: DiscoverAvatarCollage(),
+                      ),
+                    ),
+                  ],
                 ),
-                
-                // Page indicator, Sign In button, and Sign Up link
-                Padding(
-                  padding: ResponsiveUtils.scaleEdgeInsetsAll(context, 24),
-                  child: Column(
-                    children: [
-                      SmoothPageIndicator(
-                        controller: _pageController,
-                        count: OnboardingData.pages.length,
-                        effect: ExpandingDotsEffect(
-                          dotHeight: 8.scaled(context),
-                          dotWidth: 8.scaled(context),
-                          activeDotColor: AppColors.primaryGreen,
-                          dotColor: AppColors.primaryMint,
-                          expansionFactor: 3,
+              ),
+            ),
+
+            // White CTA section
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Discover who’s\naround you!',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.instrumentSans(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w800,
+                      height: 1.2,
+                      letterSpacing: -0.6,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No Awkward Intros,\nNo Missed Connections',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.instrumentSans(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 60,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.brandButton,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                      ResponsiveUtils.scaledBox(context, height: 32),
-                      AppPrimaryButton(
-                        text: 'Sign In',
-                        onPressed: _completeOnboarding,
+                      onPressed: () => context.push(AppRouter.signupBasics),
+                      child: Text(
+                        'Get Started',
+                        style: GoogleFonts.instrumentSans(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                      ResponsiveUtils.scaledBox(context, height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'New to Willcloud? ',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: AppColors.primaryDarkGreen,
-                            ),
-                          ),
-                          AppTextButton(
-                            text: 'Sign up',
-                            onPressed: () async {
-                              final prefs = await SharedPreferences.getInstance();
-                              await prefs.setBool(AppConstants.keyIsFirstLaunch, false);
-                              if (!mounted) return;
-                              context.go(AppRouter.signUp);
-                            },
-                            color: AppColors.primaryGreen,
-                          ),
-                        ],
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );

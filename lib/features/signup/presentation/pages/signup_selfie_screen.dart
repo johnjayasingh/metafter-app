@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -37,17 +38,28 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
     if (_capturing) return;
     setState(() => _capturing = true);
     try {
-      final XFile? file = await _picker.pickVideo(
+      XFile? file = await _picker.pickVideo(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front,
         maxDuration: const Duration(seconds: 5),
       );
+
+      // Camera isn't available on the iOS simulator (and may fail silently on
+      // other emulators). In debug we transparently fall back to the gallery
+      // so the flow remains testable.
+      if (file == null && kDebugMode) {
+        file = await _picker.pickVideo(
+          source: ImageSource.gallery,
+          maxDuration: const Duration(seconds: 5),
+        );
+      }
+
       if (!mounted) return;
       if (file == null) {
         setState(() => _capturing = false);
         return;
       }
-      _draft.update(() => _draft.selfiePath = file.path);
+      _draft.update(() => _draft.selfiePath = file!.path);
 
       final controller = VideoPlayerController.file(File(file.path));
       await controller.initialize();
@@ -96,48 +108,38 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
         children: [
           const SizedBox(height: 8),
           Center(
-            child: AspectRatio(
-              aspectRatio: 1,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final size = constraints.maxWidth.clamp(0, 280).toDouble();
-                  return SizedBox(
-                    width: size,
-                    height: size,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEFEFEF),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: captured
-                              ? AppColors.brandRed
-                              : Colors.black.withValues(alpha: 0.08),
-                          width: 2,
+            child: SizedBox(
+              width: 220,
+              height: 220,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFEFEF),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: captured
+                        ? AppColors.brandRed
+                        : Colors.black.withValues(alpha: 0.08),
+                    width: 2,
+                  ),
+                ),
+                child: ClipOval(
+                  child: captured
+                      ? FittedBox(
+                          fit: BoxFit.cover,
+                          child: SizedBox(
+                            width: _videoController!.value.size.width,
+                            height: _videoController!.value.size.height,
+                            child: VideoPlayer(_videoController!),
+                          ),
+                        )
+                      : const Center(
+                          child: Icon(
+                            Icons.videocam_rounded,
+                            color: AppColors.textSecondary,
+                            size: 48,
+                          ),
                         ),
-                      ),
-                      child: ClipOval(
-                        child: captured
-                            ? FittedBox(
-                                fit: BoxFit.cover,
-                                child: SizedBox(
-                                  width:
-                                      _videoController!.value.size.width,
-                                  height:
-                                      _videoController!.value.size.height,
-                                  child: VideoPlayer(_videoController!),
-                                ),
-                              )
-                            : const Center(
-                                child: Icon(
-                                  Icons.videocam_rounded,
-                                  color: AppColors.textSecondary,
-                                  size: 56,
-                                ),
-                              ),
-                      ),
-                    ),
-                  );
-                },
+                ),
               ),
             ),
           ),

@@ -13,6 +13,7 @@ class SignupScaffold extends StatelessWidget {
     required this.child,
     required this.bottomButton,
     this.scrollable = true,
+    this.showBack = false,
   });
 
   final String title;
@@ -20,6 +21,7 @@ class SignupScaffold extends StatelessWidget {
   final Widget child;
   final Widget bottomButton;
   final bool scrollable;
+  final bool showBack;
 
   @override
   Widget build(BuildContext context) {
@@ -58,11 +60,29 @@ class SignupScaffold extends StatelessWidget {
         child: Column(
           children: [
             const SizedBox(height: 8),
-            const MetafterLogo(
-              variant: MetafterLogoVariant.red,
-              height: 26,
+            SizedBox(
+              height: 44,
+              width: double.infinity,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  const Center(
+                    child: MetafterLogo(
+                      variant: MetafterLogoVariant.red,
+                      height: 26,
+                    ),
+                  ),
+                  if (showBack)
+                    Positioned(
+                      left: 8,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(child: _BackButton()),
+                    ),
+                ],
+              ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -79,6 +99,29 @@ class SignupScaffold extends StatelessWidget {
               child: bottomButton,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BackButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return InkResponse(
+      onTap: () {
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+      },
+      radius: 22,
+      child: const SizedBox(
+        width: 40,
+        height: 40,
+        child: Icon(
+          Icons.arrow_back_ios_new_rounded,
+          size: 20,
+          color: AppColors.textPrimary,
         ),
       ),
     );

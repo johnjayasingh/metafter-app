@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl_phone_field/phone_number.dart';
 
 import '../../../../core/routes/app_router.dart';
-import '../../../../core/theme/app_colors.dart';
 import '../../data/signup_draft.dart';
 import '../../data/signup_validators.dart';
 import '../widgets/metafter_field.dart';
@@ -18,7 +18,6 @@ class SignupBasicsScreen extends StatefulWidget {
 
 class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
   final _name = TextEditingController();
-  final _email = TextEditingController();
   final _phone = TextEditingController();
 
   final _draft = SignupDraft.instance;
@@ -28,44 +27,36 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
   /// at while still typing.
   bool _showErrors = false;
 
+  String _dialCode = '+91';
+  String _isoCode = 'IN';
+  bool _phoneValid = false;
+
   @override
   void initState() {
     super.initState();
     _name.text = _draft.name;
-    _email.text = _draft.email;
     _phone.text = _draft.phone;
+    if (_draft.countryCode.isNotEmpty) {
+      _dialCode = _draft.countryCode;
+    }
   }
 
   @override
   void dispose() {
     _name.dispose();
-    _email.dispose();
     _phone.dispose();
     super.dispose();
   }
 
   String? get _nameError => SignupValidators.fullName(_name.text);
 
-  /// Email / phone are an either-or pair. We only require both formats to
-  /// pass if the user actually filled in that field.
-  String? get _emailError {
-    if (_email.text.trim().isEmpty && _phone.text.trim().isNotEmpty) {
-      return null;
-    }
-    return SignupValidators.email(_email.text,
-        required: _phone.text.trim().isEmpty);
-  }
-
   String? get _phoneError {
-    if (_phone.text.trim().isEmpty && _email.text.trim().isNotEmpty) {
-      return null;
-    }
-    return SignupValidators.phone(_phone.text,
-        required: _email.text.trim().isEmpty);
+    if (_phone.text.trim().isEmpty) return 'Phone number is required';
+    if (!_phoneValid) return 'Invalid phone number';
+    return null;
   }
 
-  bool get _isValid =>
-      _nameError == null && _emailError == null && _phoneError == null;
+  bool get _isValid => _nameError == null && _phoneError == null;
 
   void _onNext() {
     if (!_isValid) {
@@ -74,8 +65,8 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
     }
     _draft.update(() {
       _draft.name = _name.text.trim();
-      _draft.email = _email.text.trim();
       _draft.phone = _phone.text.trim();
+      _draft.countryCode = _dialCode;
     });
     context.push(AppRouter.signupOtp);
   }
@@ -86,7 +77,7 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
       title: 'What should I call you?',
       bottomButton: MetafterPrimaryButton(
         label: 'Next',
-        onPressed: _onNext,
+        onPressed: _isValid ? _onNext : null,
       ),
       child: Column(
         children: [
@@ -99,46 +90,36 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 22),
-          MetafterField(
-            label: 'Email ID',
-            controller: _email,
-            hint: 'lunaray@gmail.com',
-            keyboardType: TextInputType.emailAddress,
-            errorText: _showErrors ? _emailError : null,
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 20),
-          const _OrDivider(),
-          const SizedBox(height: 12),
           MetafterPhoneField(
             controller: _phone,
+            initialCountryCode: _isoCode,
             errorText: _showErrors ? _phoneError : null,
-            onChanged: (_) => setState(() {}),
+            onChanged: (PhoneNumber number) {
+              setState(() {
+                _dialCode = '+${number.countryCode.replaceAll('+', '')}';
+                _phoneValid = _isCompleteNumber(number);
+              });
+            },
+            onCountryChanged: (country) {
+              setState(() {
+                _isoCode = country.code;
+                _dialCode = '+${country.dialCode}';
+              });
+            },
           ),
         ],
       ),
     );
   }
-}
 
-class _OrDivider extends StatelessWidget {
-  const _OrDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Expanded(child: Divider(color: Colors.black12, thickness: 1)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text('or',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 14,
-              )),
-        ),
-        const Expanded(child: Divider(color: Colors.black12, thickness: 1)),
-      ],
-    );
+  /// `intl_phone_field` doesn't expose a sync isValid getter, so we mirror
+  /// its built-in length check: the national number length must fall inside
+  /// the country's allowed range.
+  bool _isCompleteNumber(PhoneNumber number) {
+    try {
+      return number.isValidNumber();
+    } catch (_) {
+      return false;
+    }
   }
 }

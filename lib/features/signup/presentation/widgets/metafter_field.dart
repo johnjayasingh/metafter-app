@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl_phone_field/countries.dart';
+import 'package:intl_phone_field/intl_phone_field.dart';
+import 'package:intl_phone_field/phone_number.dart';
 
 import '../../../../core/theme/app_colors.dart';
 
@@ -128,23 +131,23 @@ class MetafterField extends StatelessWidget {
       );
 }
 
-/// Phone field with country code prefix that matches the design.
+/// Phone field with country code picker, flag and per-country validation.
 class MetafterPhoneField extends StatelessWidget {
   const MetafterPhoneField({
     super.key,
     required this.controller,
     this.label = 'Phone No',
-    this.countryCode = '+91',
-    this.onCountryTap,
+    this.initialCountryCode = 'IN',
     this.onChanged,
+    this.onCountryChanged,
     this.errorText,
   });
 
   final TextEditingController controller;
   final String label;
-  final String countryCode;
-  final VoidCallback? onCountryTap;
-  final ValueChanged<String>? onChanged;
+  final String initialCountryCode;
+  final ValueChanged<PhoneNumber>? onChanged;
+  final ValueChanged<Country>? onCountryChanged;
   final String? errorText;
 
   @override
@@ -164,39 +167,41 @@ class MetafterPhoneField extends StatelessWidget {
                 ? Border.all(color: _fieldError, width: 1.2)
                 : null,
           ),
-          child: Row(
-            children: [
-              InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: onCountryTap,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(countryCode, style: _inputTextStyle()),
-                ),
-              ),
-              Container(width: 1, height: 24, color: Colors.black12),
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  keyboardType: TextInputType.phone,
-                  onChanged: onChanged,
-                  cursorColor: AppColors.brandRed,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(10),
-                  ],
-                  style: _inputTextStyle(),
-                  decoration: InputDecoration(
-                    hintText: '7562086805',
-                    hintStyle: _hintTextStyle(),
-                    border: InputBorder.none,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 11),
-                  ),
-                ),
-              ),
-            ],
+          child: IntlPhoneField(
+            controller: controller,
+            initialCountryCode: initialCountryCode,
+            cursorColor: AppColors.brandRed,
+            dropdownIconPosition: IconPosition.trailing,
+            disableLengthCheck: false,
+            invalidNumberMessage: 'Invalid phone number',
+            style: _inputTextStyle(),
+            dropdownTextStyle: _inputTextStyle(),
+            flagsButtonPadding: const EdgeInsets.only(left: 12),
+            dropdownIcon: const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: AppColors.textSecondary,
+              size: 18,
+            ),
+            showCountryFlag: true,
+            keyboardType: TextInputType.phone,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: InputDecoration(
+              hintText: 'Phone number',
+              hintStyle: _hintTextStyle(),
+              filled: false,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              errorBorder: InputBorder.none,
+              focusedErrorBorder: InputBorder.none,
+              counterText: '',
+              errorStyle: const TextStyle(height: 0, fontSize: 0),
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 11),
+            ),
+            onChanged: onChanged,
+            onCountryChanged: onCountryChanged,
           ),
         ),
         if (hasError) ...[

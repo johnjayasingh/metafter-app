@@ -17,33 +17,28 @@ class SignupOtpScreen extends StatefulWidget {
 
 class _SignupOtpScreenState extends State<SignupOtpScreen> {
   static const int _length = 6;
-  final List<TextEditingController> _controllers =
-      List.generate(_length, (_) => TextEditingController());
-  final List<FocusNode> _focusNodes = List.generate(_length, (_) => FocusNode());
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-focus so the keyboard opens as soon as the screen mounts.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
+    });
+  }
 
   @override
   void dispose() {
-    for (final c in _controllers) {
-      c.dispose();
-    }
-    for (final f in _focusNodes) {
-      f.dispose();
-    }
+    _controller.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
-  String get _code => _controllers.map((c) => c.text).join();
+  String get _code => _controller.text;
 
   bool get _complete => _code.length == _length;
-
-  void _onChanged(int i, String value) {
-    if (value.isNotEmpty && i < _length - 1) {
-      _focusNodes[i + 1].requestFocus();
-    } else if (value.isEmpty && i > 0) {
-      _focusNodes[i - 1].requestFocus();
-    }
-    setState(() {});
-  }
 
   void _onContinue() {
     // TODO: call backend verify-otp endpoint with _code.
@@ -53,7 +48,7 @@ class _SignupOtpScreenState extends State<SignupOtpScreen> {
   @override
   Widget build(BuildContext context) {
     final draft = SignupDraft.instance;
-    final destination = draft.email.isNotEmpty ? draft.email : draft.phone;
+    final destination = draft.phone;
 
     return SignupScaffold(
       title: 'Almost there...',
@@ -65,10 +60,11 @@ class _SignupOtpScreenState extends State<SignupOtpScreen> {
             height: 1.4,
           ),
           children: [
-            const TextSpan(text: 'We sent a verification code to your '),
-            TextSpan(text: draft.email.isNotEmpty ? 'email id\n' : 'phone\n'),
+            const TextSpan(text: 'We sent a verification code to your\n'),
             TextSpan(
-              text: destination.isEmpty ? 'your account' : '$destination.',
+              text: destination.isEmpty
+                  ? 'phone'
+                  : 'phone ${draft.countryCode} $destination.',
               style: const TextStyle(
                 fontWeight: FontWeight.w700,
                 color: AppColors.textPrimary,
@@ -81,67 +77,112 @@ class _SignupOtpScreenState extends State<SignupOtpScreen> {
         label: 'Continue',
         onPressed: _complete ? _onContinue : null,
       ),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: const Color(0xFFEAEBEC),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
-          children: List.generate(_length, (i) {
-            return Expanded(
-              child: _OtpSlot(
-                controller: _controllers[i],
-                focusNode: _focusNodes[i],
-                onChanged: (v) => _onChanged(i, v),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _focusNode.requestFocus(),
+        child: Stack(
+          children: [
+            // Visible UI: a single grey pill split into 6 cells.
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEAEBEC),
+                borderRadius: BorderRadius.circular(14),
               ),
-            );
-          }),
+              child: AnimatedBuilder(
+                animation: Listenable.merge([_controller, _focusNode]),
+                builder: (context, _) {
+                  return Row(
+                    children: List.generate(_length, (i) {
+                      final digits = _controller.text;
+                      final char = i < digits.length ? digits[i] : '';
+                      final isCurrent = _focusNode.hasFocus &&
+                          i == digits.length.clamp(0, _length - 1) &&
+                          digits.length < _length;
+                      return Expanded(
+                        child: SizedBox(
+                          height: 24,
+                          child: Center(
+                            child: char.isNotEmpty
+                                ? Text(
+                                    char,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.textPrimary,
+                                    ),
+                                  )
+                                : (isCurrent
+                                    ? const _BlinkingCursor()
+                                    : const SizedBox.shrink()),
+                          ),
+                        ),
+                      );
+                    }),
+                  );
+                },
+              ),
+            ),
+            // Invisible TextField captures keyboard input.
+            Positioned.fill(
+              child: Opacity(
+                opacity: 0,
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  keyboardType: TextInputType.number,
+                  maxLength: _length,
+                  showCursor: false,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    counterText: '',
+                    border: InputBorder.none,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _OtpSlot extends StatelessWidget {
-  const _OtpSlot({
-    required this.controller,
-    required this.focusNode,
-    required this.onChanged,
-  });
+/// Vertical brand-red bar that blinks at ~1Hz to mark the active OTP cell.
+class _BlinkingCursor extends StatefulWidget {
+  const _BlinkingCursor();
 
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final ValueChanged<String> onChanged;
+  @override
+  State<_BlinkingCursor> createState() => _BlinkingCursorState();
+}
+
+class _BlinkingCursorState extends State<_BlinkingCursor>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1000),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      focusNode: focusNode,
-      textAlign: TextAlign.center,
-      textAlignVertical: TextAlignVertical.center,
-      keyboardType: TextInputType.number,
-      maxLength: 1,
-      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-      cursorColor: AppColors.brandRed,
-      cursorHeight: 22,
-      style: const TextStyle(
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
-        color: AppColors.textPrimary,
-        height: 1.0,
-      ),
-      decoration: const InputDecoration(
-        counterText: '',
-        filled: false,
-        border: InputBorder.none,
-        enabledBorder: InputBorder.none,
-        focusedBorder: InputBorder.none,
-        isCollapsed: true,
-        contentPadding: EdgeInsets.zero,
-      ),
-      onChanged: onChanged,
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, _) {
+        final visible = _ctrl.value < 0.5;
+        return Container(
+          width: 2,
+          height: 22,
+          color: visible ? AppColors.brandRed : Colors.transparent,
+        );
+      },
     );
   }
 }

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/routes/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -113,13 +114,34 @@ class SignupPhotoScreen extends StatefulWidget {
 
 class _SignupPhotoScreenState extends State<SignupPhotoScreen> {
   final _draft = SignupDraft.instance;
+  final ImagePicker _picker = ImagePicker();
+  bool _picking = false;
 
   Future<void> _onAddPhoto() async {
-    // TODO: integrate image_picker for gallery selection. For the prototype
-    // we simply mark a photo as picked and advance to the selfie capture.
-    _draft.update(() => _draft.photoPath = _draft.photoPath ?? '');
-    if (!mounted) return;
-    context.push(AppRouter.signupSelfie);
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      final XFile? file = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 1600,
+      );
+      if (!mounted) return;
+      if (file == null) {
+        setState(() => _picking = false);
+        return;
+      }
+      _draft.update(() => _draft.photoPath = file.path);
+      if (!mounted) return;
+      context.push(AppRouter.signupSelfie);
+    } on Exception catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load image: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
   }
 
   @override
@@ -127,17 +149,20 @@ class _SignupPhotoScreenState extends State<SignupPhotoScreen> {
     final subtitle =
         '${_draft.designation.isEmpty ? 'Your role' : _draft.designation}'
         ' - ${_draft.company.isEmpty ? 'Company' : _draft.company}';
+    final hasPhoto = (_draft.photoPath ?? '').isNotEmpty;
     return SignupScaffold(
       title: 'Let’s add a profile photo',
       bottomButton: MetafterPrimaryButton(
-        label: 'Add Photo',
-        onPressed: _onAddPhoto,
+        label: _picking
+            ? 'Opening gallery…'
+            : (hasPhoto ? 'Change Photo' : 'Add Photo'),
+        onPressed: _picking ? null : _onAddPhoto,
       ),
       child: Column(
         children: [
           const SizedBox(height: 20),
           SignupProfileCard(
-            photoPath: null, // empty placeholder per design
+            photoPath: hasPhoto ? _draft.photoPath : null,
             name: _draft.name,
             subtitle: subtitle,
             introduction: _draft.introduction.isEmpty

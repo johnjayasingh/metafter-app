@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 
 class AppColors {
   // ==================== MetAfter Brand ====================
-  /// Primary red used in splash + onboarding headers.
-  static const Color brandRed = Color(0xFFE94B4B);
+  /// Primary red used across the app (splash, buttons, accents).
+  static const Color brandRed = Color(0xFFED2839);
   /// Darker red used at the top of the splash gradient.
-  static const Color brandRedDeep = Color(0xFFD93636);
+  static const Color brandRedDeep = Color(0xFFC81F2E);
   /// Soft pink used at the bottom of the splash/onboarding gradient.
   static const Color brandRedSoft = Color(0xFFFCE4E1);
   /// Onboarding "Get Started" button color.
-  static const Color brandButton = Color(0xFFE05A5A);
+  static const Color brandButton = Color(0xFFED2839);
 
   // Primary gradient colors
   static const Color primaryMint = Color(0xFFB8E6D5);

@@ -56,8 +56,61 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
 
   StreamSubscription<List<ScanResult>>? _scanSub;
   Timer? _mockTimer;
+  Timer? _requestTimer;
   final Map<String, _NearbyPerson> _nearby = <String, _NearbyPerson>{};
   final _rng = math.Random(7);
+
+  // Simulated incoming connection requests.
+  final List<_IncomingRequest> _incomingRequests = [];
+  int _requestIndex = 0;
+
+  static const _mockRequestPool = <_IncomingRequest>[
+    _IncomingRequest(
+      id: 'req-001',
+      name: 'Luna Ray',
+      title: 'Head of Marketing',
+      company: 'MarketVerse',
+      photoUrl: 'https://i.pravatar.cc/150?img=47',
+      avatarColor: Color(0xFFF3D9A4),
+      initials: 'LR',
+    ),
+    _IncomingRequest(
+      id: 'req-002',
+      name: 'Marcus Reid',
+      title: 'Lead Engineer',
+      company: 'TechNova',
+      photoUrl: 'https://i.pravatar.cc/150?img=11',
+      avatarColor: Color(0xFFB7D9F2),
+      initials: 'MR',
+    ),
+    _IncomingRequest(
+      id: 'req-003',
+      name: 'Koby Stone',
+      title: 'SVP Engineering',
+      company: 'InnoVision',
+      photoUrl: 'https://i.pravatar.cc/150?img=12',
+      avatarColor: Color(0xFFE3C8B5),
+      initials: 'KS',
+    ),
+    _IncomingRequest(
+      id: 'req-004',
+      name: 'Nina Vo',
+      title: 'Product Manager',
+      company: 'GrowthLab',
+      photoUrl: 'https://i.pravatar.cc/150?img=48',
+      avatarColor: Color(0xFFD9CFEB),
+      initials: 'NV',
+    ),
+    _IncomingRequest(
+      id: 'req-005',
+      name: 'Sam Shah',
+      title: 'Founder',
+      company: 'StartupXYZ',
+      photoUrl: 'https://i.pravatar.cc/150?img=12',
+      avatarColor: Color(0xFFEBC4D6),
+      initials: 'SS',
+    ),
+  ];
 
   bool get _isMockMode =>
       EnvironmentConfig.isDev || EnvironmentConfig.isLocal;
@@ -70,6 +123,9 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
     (id: 'mock-004', meters: 1.8, avatarIndex: 3),
     (id: 'mock-005', meters: 3.0, avatarIndex: 4),
     (id: 'mock-006', meters: 0.9, avatarIndex: 5),
+    (id: 'mock-007', meters: 5.2, avatarIndex: 1),
+    (id: 'mock-008', meters: 2.1, avatarIndex: 3),
+    (id: 'mock-009', meters: 3.7, avatarIndex: 0),
   ];
 
   static const _mockProfiles = <int, NearbyPersonProfile>{
@@ -135,6 +191,25 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
     ),
   };
 
+  void _openNearbyList(BuildContext context, Color accent) {
+    final sorted = _nearby.values.toList()
+      ..sort((a, b) => a.meters.compareTo(b.meters));
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _NearbyListSheet(
+        nearby: sorted,
+        profiles: _mockProfiles,
+        accent: accent,
+        onPersonTap: (p) {
+          Navigator.of(context).pop();
+          _openProfile(context, p);
+        },
+      ),
+    );
+  }
+
   void _openProfile(BuildContext context, _NearbyPerson person) {
     final profile = _isMockMode
         ? _mockProfiles[person.avatarIndex] ??
@@ -159,6 +234,33 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
         builder: (_) => NearbyPersonProfileScreen(profile: profile),
       ),
     );
+  }
+
+  void _startMockRequests() {
+    _requestTimer?.cancel();
+    _requestIndex = 0;
+    // First request arrives after 5 s, then one every 7 s.
+    _requestTimer = Timer.periodic(const Duration(seconds: 7), (_) {
+      if (!mounted) return;
+      if (_requestIndex >= _mockRequestPool.length) {
+        _requestTimer?.cancel();
+        return;
+      }
+      final req = _mockRequestPool[_requestIndex++];
+      // Avoid duplicates.
+      if (_incomingRequests.any((r) => r.id == req.id)) return;
+      setState(() => _incomingRequests.add(req));
+    });
+    // Also fire the first one after 5 s.
+    Future.delayed(const Duration(seconds: 5), () {
+      if (!mounted || !_discoverable) return;
+      if (_requestIndex < _mockRequestPool.length) {
+        final req = _mockRequestPool[_requestIndex++];
+        if (!_incomingRequests.any((r) => r.id == req.id)) {
+          setState(() => _incomingRequests.add(req));
+        }
+      }
+    });
   }
 
   void _startMockScan() {
@@ -188,6 +290,7 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
     _ticker?.cancel();
     _scanSub?.cancel();
     _mockTimer?.cancel();
+    _requestTimer?.cancel();
     if (_discoverable && !_isMockMode) {
       FlutterBluePlus.stopScan();
     }
@@ -238,6 +341,7 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
 
     if (_isMockMode) {
       _startMockScan();
+      _startMockRequests();
       return;
     }
 
@@ -252,7 +356,7 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
         if (meters > maxMeters * 4) continue; // ignore obvious outliers
         final existing = _nearby[id];
         if (existing == null) {
-          if (_nearby.length >= 6) continue; // cap avatars
+          if (_nearby.length >= 10) continue; // cap avatars
           _nearby[id] = _NearbyPerson(
             id: id,
             meters: meters,
@@ -288,6 +392,8 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
     _ticker?.cancel();
     _mockTimer?.cancel();
     _mockTimer = null;
+    _requestTimer?.cancel();
+    _requestTimer = null;
     _scanSub?.cancel();
     _scanSub = null;
     if (!_isMockMode) {
@@ -302,6 +408,8 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
       _discoverable = false;
       _remaining = Duration.zero;
       _nearby.clear();
+      _incomingRequests.clear();
+      _requestIndex = 0;
     });
   }
 
@@ -370,8 +478,10 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
+            Column(
+              children: [
             // ---- Header ----
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -446,6 +556,7 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
                         photoPath: hasPhoto ? photo : null,
                         nearby: _nearby.values.toList(growable: false),
                         onPersonTap: (p) => _openProfile(context, p),
+                        onViewAll: () => _openNearbyList(context, accent),
                       ),
                     ),
                   );
@@ -541,12 +652,43 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
                 ],
               ),
             ),
-          ],
-        ),
+          ], // Column children
+        ), // Column
+
+            // ---- Pull-up incoming requests bar ----
+            if (_discoverable && _incomingRequests.isNotEmpty)
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: _PullUpBar(
+                  count: _incomingRequests.length,
+                  accent: accent,
+                  onTap: () => _openIncomingRequests(context, accent),
+                ),
+              ),
+          ], // Stack children
+        ), // Stack
+      ),
+    );
+  }
+
+  void _openIncomingRequests(BuildContext context, Color accent) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _IncomingRequestsSheet(
+        requests: List.unmodifiable(_incomingRequests),
+        accent: accent,
+        onAccept: (req) => setState(() => _incomingRequests.remove(req)),
+        onDecline: (req) => setState(() => _incomingRequests.remove(req)),
       ),
     );
   }
 }
+
+// ─── Data models ─────────────────────────────────────────────────────────────
 
 /// One discovered nearby person.
 class _NearbyPerson {
@@ -561,6 +703,346 @@ class _NearbyPerson {
   final int avatarIndex;
 }
 
+/// An incoming connection request from another user.
+class _IncomingRequest {
+  const _IncomingRequest({
+    required this.id,
+    required this.name,
+    required this.title,
+    required this.company,
+    required this.photoUrl,
+    required this.avatarColor,
+    required this.initials,
+  });
+
+  final String id;
+  final String name;
+  final String title;
+  final String company;
+  final String photoUrl;
+  final Color avatarColor;
+  final String initials;
+}
+
+// ─── Pull-up requests indicator ───────────────────────────────────────────────
+
+/// Floating bar at the bottom that pulses with the Lottie arrow animation
+/// when there are pending incoming connection requests.
+class _PullUpBar extends StatelessWidget {
+  const _PullUpBar({
+    required this.count,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final int count;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        decoration: BoxDecoration(
+          color: accent,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: accent.withValues(alpha: 0.40),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            // Lottie "swipe up" arrows, tinted white via ColorFiltered.
+            SizedBox(
+              width: 36,
+              height: 36,
+              child: ColorFiltered(
+                colorFilter: const ColorFilter.mode(
+                    Colors.white, BlendMode.srcIn),
+                child: Lottie.asset(
+                  'assets/animation/pull-up.json',
+                  repeat: true,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '$count incoming connection${count == 1 ? '' : 's'}',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const Text(
+                    'Tap to review',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.25),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  '$count',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Incoming requests bottom sheet ──────────────────────────────────────────
+
+class _IncomingRequestsSheet extends StatefulWidget {
+  const _IncomingRequestsSheet({
+    required this.requests,
+    required this.accent,
+    required this.onAccept,
+    required this.onDecline,
+  });
+
+  final List<_IncomingRequest> requests;
+  final Color accent;
+  final void Function(_IncomingRequest) onAccept;
+  final void Function(_IncomingRequest) onDecline;
+
+  @override
+  State<_IncomingRequestsSheet> createState() =>
+      _IncomingRequestsSheetState();
+}
+
+class _IncomingRequestsSheetState extends State<_IncomingRequestsSheet> {
+  late final List<_IncomingRequest> _items;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = List.of(widget.requests);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.60,
+      minChildSize: 0.4,
+      maxChildSize: 0.92,
+      expand: false,
+      builder: (_, scrollController) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              // Handle.
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                child: Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDDDDDD),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              // Header.
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Connection Requests (${_items.length})',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded, size: 22),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              if (_items.isEmpty)
+                Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle_outline_rounded,
+                            size: 56,
+                            color: widget.accent.withValues(alpha: 0.5)),
+                        const SizedBox(height: 12),
+                        const Text('All caught up!',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF6B6B6B))),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                Expanded(
+                  child: ListView.separated(
+                    controller: scrollController,
+                    padding: const EdgeInsets.only(bottom: 32),
+                    itemCount: _items.length,
+                    separatorBuilder: (_, __) => const Divider(
+                        height: 1,
+                        indent: 84,
+                        endIndent: 20,
+                        color: Color(0xFFF0F0F0)),
+                    itemBuilder: (_, i) {
+                      final req = _items[i];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        child: Row(
+                          children: [
+                            // Avatar.
+                            ClipOval(
+                              child: Image.network(
+                                req.photoUrl,
+                                width: 52,
+                                height: 52,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Container(
+                                  width: 52,
+                                  height: 52,
+                                  color: req.avatarColor,
+                                  child: Center(
+                                    child: Text(req.initials,
+                                        style: const TextStyle(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white)),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            // Name + title.
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(req.name,
+                                      style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.black)),
+                                  Text(
+                                      '${req.title}  ·  ${req.company}',
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFF6B6B6B))),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Decline.
+                            GestureDetector(
+                              onTap: () {
+                                widget.onDecline(req);
+                                setState(() => _items.remove(req));
+                              },
+                              child: Container(
+                                width: 38,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: const Color(0xFFDDDDDD),
+                                      width: 1.5),
+                                ),
+                                child: const Icon(Icons.close_rounded,
+                                    size: 18,
+                                    color: Color(0xFF8A8A8A)),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Accept.
+                            GestureDetector(
+                              onTap: () {
+                                widget.onAccept(req);
+                                setState(() => _items.remove(req));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    duration: const Duration(seconds: 2),
+                                    content: Text(
+                                        'Connected with ${req.name}!'),
+                                    backgroundColor: widget.accent,
+                                  ),
+                                );
+                              },
+                              child: Container(
+                                width: 38,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: widget.accent,
+                                ),
+                                child: const Icon(Icons.check_rounded,
+                                    size: 18, color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─── Legacy placeholder removed — pulse is now Lottie ─────────────────────
+
 /// Local placeholder avatars (deterministic colors with initials).
 const List<({String initials, Color color})> _fallbackAvatars = [
   (initials: 'AJ', color: Color(0xFFE3C8B5)),
@@ -571,7 +1053,10 @@ const List<({String initials, Color color})> _fallbackAvatars = [
   (initials: 'LR', color: Color(0xFFF3D9A4)),
 ];
 
-/// Concentric rings + animated pulse waves + centre avatar + nearby avatars.
+/// Max avatars shown on the radar before the "+N more" overflow badge kicks in.
+const int _kMaxRadarAvatars = 5;
+
+/// Concentric rings + animated ripple + centre avatar + nearby avatars.
 class _RadarArea extends StatefulWidget {
   const _RadarArea({
     required this.accent,
@@ -579,6 +1064,7 @@ class _RadarArea extends StatefulWidget {
     required this.photoPath,
     required this.nearby,
     this.onPersonTap,
+    this.onViewAll,
   });
 
   final Color accent;
@@ -586,6 +1072,8 @@ class _RadarArea extends StatefulWidget {
   final String? photoPath;
   final List<_NearbyPerson> nearby;
   final void Function(_NearbyPerson)? onPersonTap;
+  /// Called when the user taps the "+N" overflow badge or the "View all" chip.
+  final VoidCallback? onViewAll;
 
   @override
   State<_RadarArea> createState() => _RadarAreaState();
@@ -632,6 +1120,46 @@ class _RadarAreaState extends State<_RadarArea> {
 
         // Nearby avatars (only when discoverable).
         if (widget.discoverable) ..._buildNearby(context, widget.onPersonTap),
+
+        // "View all N" chip — visible whenever there are more people than fit.
+        if (widget.discoverable && widget.nearby.length > _kMaxRadarAvatars)
+          Positioned(
+            bottom: 8,
+            child: GestureDetector(
+              onTap: widget.onViewAll,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: widget.accent,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: widget.accent.withValues(alpha: 0.35),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.people_alt_rounded,
+                        size: 14, color: Colors.white),
+                    const SizedBox(width: 6),
+                    Text(
+                      'View all ${widget.nearby.length} nearby',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -641,10 +1169,20 @@ class _RadarAreaState extends State<_RadarArea> {
     void Function(_NearbyPerson)? onPersonTap,
   ) {
     if (widget.nearby.isEmpty) return const [];
-    final positions = _fixedPositions(widget.nearby.length);
+
+    // Sort by proximity so the closest people are shown first on the radar.
+    final sorted = [...widget.nearby]
+      ..sort((a, b) => a.meters.compareTo(b.meters));
+
+    final overflow = sorted.length - _kMaxRadarAvatars;
+    final visible = sorted.take(_kMaxRadarAvatars).toList();
+    // One extra slot for the "+N" badge when there are more people.
+    final slotCount = overflow > 0 ? visible.length + 1 : visible.length;
+    final positions = _fixedPositions(slotCount);
     final widgets = <Widget>[];
-    for (var i = 0; i < widget.nearby.length && i < positions.length; i++) {
-      final person = widget.nearby[i];
+
+    for (var i = 0; i < visible.length && i < positions.length; i++) {
+      final person = visible[i];
       final pos = positions[i];
       final avatar = _fallbackAvatars[
           person.avatarIndex.clamp(0, _fallbackAvatars.length - 1)];
@@ -661,6 +1199,21 @@ class _RadarAreaState extends State<_RadarArea> {
         ),
       );
     }
+
+    // "+N" overflow badge in the last slot.
+    if (overflow > 0 && positions.length > visible.length) {
+      widgets.add(
+        Align(
+          alignment: positions[visible.length],
+          child: _OverflowBadge(
+            count: overflow,
+            accent: widget.accent,
+            onTap: widget.onViewAll,
+          ),
+        ),
+      );
+    }
+
     return widgets;
   }
 
@@ -822,6 +1375,229 @@ class _NearbyAvatar extends StatelessWidget {
     if (m < 1) return '${m.toStringAsFixed(1)} mtr';
     return '${m.toStringAsFixed(m < 10 ? 1 : 0)} mtr';
   }
+}
+
+/// "+N" circle shown in the last radar slot when more people are nearby.
+class _OverflowBadge extends StatelessWidget {
+  const _OverflowBadge({
+    required this.count,
+    required this.accent,
+    this.onTap,
+  });
+
+  final int count;
+  final Color accent;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: accent.withValues(alpha: 0.15),
+              border: Border.all(color: accent, width: 2.5),
+            ),
+            child: Center(
+              child: Text(
+                '+$count',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: accent,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.06),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: const Text(
+              'more',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF333333),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Nearby list bottom sheet ──────────────────────────────────────────────
+
+class _NearbyListSheet extends StatelessWidget {
+  const _NearbyListSheet({
+    required this.nearby,
+    required this.profiles,
+    required this.accent,
+    required this.onPersonTap,
+  });
+
+  final List<_NearbyPerson> nearby;
+  final Map<int, NearbyPersonProfile> profiles;
+  final Color accent;
+  final void Function(_NearbyPerson) onPersonTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.65,
+      minChildSize: 0.4,
+      maxChildSize: 0.92,
+      expand: false,
+      builder: (_, scrollController) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              // Handle bar.
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDDDDDD),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              // Header.
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Nearby People (${nearby.length})',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded, size: 22),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              // List.
+              Expanded(
+                child: ListView.separated(
+                  controller: scrollController,
+                  padding: const EdgeInsets.only(bottom: 32),
+                  itemCount: nearby.length,
+                  separatorBuilder: (_, __) => const Divider(
+                    height: 1,
+                    indent: 84,
+                    endIndent: 20,
+                    color: Color(0xFFF0F0F0),
+                  ),
+                  itemBuilder: (_, i) {
+                    final person = nearby[i];
+                    final avatar = _fallbackAvatars[
+                        person.avatarIndex.clamp(
+                            0, _fallbackAvatars.length - 1)];
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 8),
+                      leading: Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: avatar.color,
+                          border: Border.all(color: accent, width: 2.5),
+                        ),
+                        child: Center(
+                          child: Text(
+                            avatar.initials,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        profiles[person.avatarIndex]?.name ?? avatar.initials,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black,
+                        ),
+                      ),
+                      subtitle: Text(
+                        profiles[person.avatarIndex] != null
+                            ? '${profiles[person.avatarIndex]!.title}  ·  ${profiles[person.avatarIndex]!.company}'
+                            : '',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF6B6B6B),
+                        ),
+                      ),
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          _fmt(person.meters),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: accent,
+                          ),
+                        ),
+                      ),
+                      onTap: () => onPersonTap(person),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _fmt(double m) =>
+      m < 1 ? '${m.toStringAsFixed(1)} m' : '${m.toStringAsFixed(1)} m';
 }
 
 class _IncognitoSwitch extends StatelessWidget {

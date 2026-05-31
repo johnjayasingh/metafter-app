@@ -40,8 +40,10 @@ class _SignupVerifyingScreenState extends State<SignupVerifyingScreen> {
     super.dispose();
   }
 
-  void _onDone() {
-    SignupDraft.instance.reset();
+  void _onDone() async {
+    // Persist the signup so the user stays signed in across launches.
+    await SignupDraft.instance.save();
+    if (!mounted) return;
     context.go(AppRouter.home);
   }
 

@@ -39,6 +39,11 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
     if (_draft.countryCode.isNotEmpty) {
       _dialCode = _draft.countryCode;
     }
+    // Treat a prefilled non-empty phone as valid optimistically; the
+    // IntlPhoneField will re-validate on the next edit.
+    if (_phone.text.trim().isNotEmpty) {
+      _phoneValid = true;
+    }
   }
 
   @override

@@ -34,29 +34,50 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
     super.dispose();
   }
 
+  Future<XFile?> _pickFromGallery() {
+    return _picker.pickVideo(
+      source: ImageSource.gallery,
+      maxDuration: const Duration(seconds: 5),
+    );
+  }
+
   Future<void> _onCapture() async {
     if (_capturing) return;
     setState(() => _capturing = true);
     try {
-      XFile? file = await _picker.pickVideo(
-        source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.front,
-        maxDuration: const Duration(seconds: 5),
-      );
-
-      // Camera isn't available on the iOS simulator (and may fail silently on
-      // other emulators). In debug we transparently fall back to the gallery
-      // so the flow remains testable.
-      if (file == null && kDebugMode) {
+      XFile? file;
+      try {
         file = await _picker.pickVideo(
-          source: ImageSource.gallery,
+          source: ImageSource.camera,
+          preferredCameraDevice: CameraDevice.front,
           maxDuration: const Duration(seconds: 5),
         );
+      } on Exception {
+        // Camera not available (e.g. iOS simulator). Fall back to gallery
+        // in debug builds so the flow remains testable.
+        if (!kDebugMode) rethrow;
+        try {
+          file = await _pickFromGallery();
+        } on Exception {
+          file = null;
+        }
+      }
+
+      // Some platforms silently return null when the camera isn't
+      // available instead of throwing. Apply the same debug fallback.
+      if (file == null && kDebugMode) {
+        try {
+          file = await _pickFromGallery();
+        } on Exception {
+          file = null;
+        }
       }
 
       if (!mounted) return;
       if (file == null) {
+        // Skip this step for now if we couldn't get any media.
         setState(() => _capturing = false);
+        context.push(AppRouter.signupVerifying);
         return;
       }
       _draft.update(() => _draft.selfiePath = file!.path);
@@ -74,11 +95,10 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
         _videoController?.dispose();
         _videoController = controller;
       });
-    } on Exception catch (e) {
+    } on Exception {
+      // Skip ahead on any unexpected error so the user isn't blocked.
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not capture video: $e')),
-      );
+      context.push(AppRouter.signupVerifying);
     } finally {
       if (mounted) setState(() => _capturing = false);
     }
@@ -98,12 +118,39 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
         'We’ll capture a 5-second video and match it with your profile '
         'photo to confirm it’s really you.',
       ),
-      bottomButton: captured
-          ? MetafterPrimaryButton(label: 'Continue', onPressed: _onContinue)
-          : MetafterPrimaryButton(
+      bottomButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (captured)
+            MetafterPrimaryButton(
+              label: 'Continue',
+              onPressed: _onContinue,
+            )
+          else
+            MetafterPrimaryButton(
               label: _capturing ? 'Opening camera…' : 'Capture Video Selfie',
               onPressed: _capturing ? null : _onCapture,
             ),
+          if (!captured)
+            TextButton(
+              onPressed: () {
+                // Always allow skipping, even while a picker is opening.
+                setState(() => _capturing = false);
+                _onContinue();
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.textSecondary,
+              ),
+              child: const Text(
+                'Skip for now',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+        ],
+      ),
       child: Column(
         children: [
           const SizedBox(height: 8),

@@ -1,6 +1,6 @@
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/home/presentation/pages/discovery_home_screen.dart';
 import '../../features/onboarding/presentation/pages/onboarding_screen.dart';
 import '../../features/onboarding/presentation/pages/splash_screen.dart';
 import '../../features/signup/presentation/pages/signup_basics_screen.dart';
@@ -10,8 +10,6 @@ import '../../features/signup/presentation/pages/signup_profile_screen.dart';
 import '../../features/signup/presentation/pages/signup_selfie_screen.dart';
 import '../../features/signup/presentation/pages/signup_verifying_screen.dart';
 import '../../main.dart' as main_file;
-import '../theme/app_colors.dart';
-import '../theme/app_text_styles.dart';
 
 /// Minimal app router skeleton.
 ///
@@ -49,7 +47,7 @@ class AppRouter {
       ),
       GoRoute(
         path: home,
-        builder: (context, state) => const _HomePlaceholder(),
+        builder: (context, state) => const DiscoveryHomeScreen(),
       ),
       GoRoute(
         path: signupBasics,
@@ -77,40 +75,4 @@ class AppRouter {
       ),
     ],
   );
-}
-
-class _HomePlaceholder extends StatelessWidget {
-  const _HomePlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.backgroundWhite,
-      appBar: AppBar(
-        title: Text('Metafter', style: AppTextStyles.sectionTitle),
-        centerTitle: true,
-        backgroundColor: AppColors.backgroundWhite,
-        elevation: 0,
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.rocket_launch, size: 72, color: AppColors.primaryDarkGreen),
-              const SizedBox(height: 24),
-              Text('Welcome to Metafter', style: AppTextStyles.welcomeTitle),
-              const SizedBox(height: 8),
-              Text(
-                'Start building your features under lib/features/.',
-                style: AppTextStyles.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }

@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/config/environment_config.dart';
+import 'core/data/mock_data.dart';
 import 'core/network/api_client.dart';
 import 'core/routes/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'features/signup/data/signup_draft.dart';
 
 /// Global navigator key — allows triggering navigation from outside the
 /// widget tree (e.g. session timeout handlers).
@@ -23,6 +25,15 @@ Future<void> bootstrap({
 
   EnvironmentConfig.setEnvironment(environment);
   ApiClient().initialize();
+
+  // Restore any previously-persisted signup draft (keeps the user signed
+  // in across launches).
+  await SignupDraft.instance.load();
+
+  // Prefill the signup draft with mock data in debug builds so we can
+  // tab through the multi-step signup flow without retyping everything.
+  // Skipped if a real draft was already persisted.
+  MockData.prefillSignupDraft();
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(

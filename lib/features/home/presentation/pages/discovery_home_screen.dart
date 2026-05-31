@@ -4,10 +4,16 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:lottie/lottie.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../../../core/config/environment_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../signup/data/signup_draft.dart';
+import 'connect_screen.dart';
+import 'discover_history_screen.dart';
+import 'nearby_person_profile_screen.dart';
+import 'profile_settings_screen.dart';
 
 /// MetAfter discovery landing page.
 ///
@@ -40,6 +46,7 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
   };
 
   bool _discoverable = false;
+  bool _incognito = false; // false = public (visible to others); true = hidden
   bool _starting = false;
   String _durationLabel = '4 hrs';
   String _distanceLabel = '2 mts';
@@ -48,14 +55,140 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
   Duration _remaining = Duration.zero;
 
   StreamSubscription<List<ScanResult>>? _scanSub;
+  Timer? _mockTimer;
   final Map<String, _NearbyPerson> _nearby = <String, _NearbyPerson>{};
   final _rng = math.Random(7);
+
+  bool get _isMockMode =>
+      EnvironmentConfig.isDev || EnvironmentConfig.isLocal;
+
+  static const _mockDevices =
+      <({String id, double meters, int avatarIndex})>[
+    (id: 'mock-001', meters: 1.2, avatarIndex: 0),
+    (id: 'mock-002', meters: 2.5, avatarIndex: 1),
+    (id: 'mock-003', meters: 4.1, avatarIndex: 2),
+    (id: 'mock-004', meters: 1.8, avatarIndex: 3),
+    (id: 'mock-005', meters: 3.0, avatarIndex: 4),
+    (id: 'mock-006', meters: 0.9, avatarIndex: 5),
+  ];
+
+  static const _mockProfiles = <int, NearbyPersonProfile>{
+    0: NearbyPersonProfile(
+      name: 'Luna Ray',
+      title: 'VP, Sales',
+      company: 'SaleSail',
+      bio:
+          'I am a brand sales person who focuses on clarity and emotional connections of clients',
+      photoUrl: 'https://i.pravatar.cc/300?img=47',
+      initials: 'AJ',
+      avatarBg: Color(0xFFE3C8B5),
+    ),
+    1: NearbyPersonProfile(
+      name: 'Marcus Reid',
+      title: 'Lead Engineer',
+      company: 'TechNova',
+      bio:
+          'Building products that matter. Passionate about clean architecture and great developer experience.',
+      photoUrl: 'https://i.pravatar.cc/300?img=11',
+      initials: 'MR',
+      avatarBg: Color(0xFFB7D9F2),
+    ),
+    2: NearbyPersonProfile(
+      name: 'Kira Patel',
+      title: 'UX Designer',
+      company: 'Designly',
+      bio:
+          'Crafting intuitive experiences that bridge the gap between humans and technology.',
+      photoUrl: 'https://i.pravatar.cc/300?img=49',
+      initials: 'KP',
+      avatarBg: Color(0xFFC9E5C4),
+    ),
+    3: NearbyPersonProfile(
+      name: 'Sam Shah',
+      title: 'Founder',
+      company: 'StartupXYZ',
+      bio:
+          'Serial entrepreneur on a mission to democratise access to financial tools.',
+      photoUrl: 'https://i.pravatar.cc/300?img=12',
+      initials: 'SS',
+      avatarBg: Color(0xFFEBC4D6),
+    ),
+    4: NearbyPersonProfile(
+      name: 'Nina Vo',
+      title: 'Product Manager',
+      company: 'GrowthLab',
+      bio:
+          'Turning customer insights into product strategy. Love hiking and cold brew coffee.',
+      photoUrl: 'https://i.pravatar.cc/300?img=48',
+      initials: 'NV',
+      avatarBg: Color(0xFFD9CFEB),
+    ),
+    5: NearbyPersonProfile(
+      name: 'Liam Ross',
+      title: 'Data Scientist',
+      company: 'Analytix',
+      bio:
+          'Turning data into stories. Machine learning enthusiast and part-time skateboarder.',
+      photoUrl: 'https://i.pravatar.cc/300?img=15',
+      initials: 'LR',
+      avatarBg: Color(0xFFF3D9A4),
+    ),
+  };
+
+  void _openProfile(BuildContext context, _NearbyPerson person) {
+    final profile = _isMockMode
+        ? _mockProfiles[person.avatarIndex] ??
+            const NearbyPersonProfile(
+              name: 'Unknown',
+              title: '',
+              company: '',
+              bio: '',
+              initials: '?',
+            )
+        : NearbyPersonProfile(
+            name: person.id,
+            title: '',
+            company: '',
+            bio: '',
+            initials: person.id.isNotEmpty
+                ? person.id.substring(0, 1).toUpperCase()
+                : '?',
+          );
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => NearbyPersonProfileScreen(profile: profile),
+      ),
+    );
+  }
+
+  void _startMockScan() {
+    var index = 0;
+    _mockTimer?.cancel();
+    _mockTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (!mounted || index >= _mockDevices.length) {
+        _mockTimer?.cancel();
+        return;
+      }
+      final device = _mockDevices[index++];
+      final maxMeters = _distances[_distanceLabel] ?? 2.0;
+      if (device.meters <= maxMeters * 4) {
+        setState(() {
+          _nearby[device.id] = _NearbyPerson(
+            id: device.id,
+            meters: device.meters,
+            avatarIndex: device.avatarIndex,
+          );
+        });
+      }
+    });
+  }
 
   @override
   void dispose() {
     _ticker?.cancel();
     _scanSub?.cancel();
-    if (_discoverable) {
+    _mockTimer?.cancel();
+    if (_discoverable && !_isMockMode) {
       FlutterBluePlus.stopScan();
     }
     super.dispose();
@@ -68,19 +201,21 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
     if (_starting || _discoverable) return;
     setState(() => _starting = true);
 
-    final ok = await _ensureBluetoothReady();
-    if (!mounted) return;
-    if (!ok) {
-      setState(() => _starting = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Bluetooth permission denied. Please enable Bluetooth to '
-            'discover people nearby.',
+    if (!_isMockMode) {
+      final ok = await _ensureBluetoothReady();
+      if (!mounted) return;
+      if (!ok) {
+        setState(() => _starting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Bluetooth permission denied. Please enable Bluetooth to '
+              'discover people nearby.',
+            ),
           ),
-        ),
-      );
-      return;
+        );
+        return;
+      }
     }
 
     final total = _sessionDurations[_durationLabel] ?? const Duration(hours: 4);
@@ -100,6 +235,11 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
         setState(() => _remaining -= const Duration(seconds: 1));
       }
     });
+
+    if (_isMockMode) {
+      _startMockScan();
+      return;
+    }
 
     _scanSub?.cancel();
     _scanSub = FlutterBluePlus.scanResults.listen((results) {
@@ -146,12 +286,16 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
 
   Future<void> _endSession() async {
     _ticker?.cancel();
+    _mockTimer?.cancel();
+    _mockTimer = null;
     _scanSub?.cancel();
     _scanSub = null;
-    try {
-      await FlutterBluePlus.stopScan();
-    } on Exception {
-      // ignore
+    if (!_isMockMode) {
+      try {
+        await FlutterBluePlus.stopScan();
+      } on Exception {
+        // ignore
+      }
     }
     if (!mounted) return;
     setState(() {
@@ -235,7 +379,11 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
                 children: [
                   IconButton(
                     icon: Icon(Icons.history_rounded, color: accent),
-                    onPressed: () {},
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const DiscoverHistoryScreen(),
+                      ),
+                    ),
                   ),
                   Expanded(
                     child: Center(
@@ -251,18 +399,30 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
                     ),
                   ),
                   _IncognitoSwitch(
-                    value: !_discoverable,
+                    value: _incognito,
                     accent: accent,
                     onChanged: (v) {
-                      if (_discoverable) {
-                        _endSession();
-                      }
+                      setState(() => _incognito = v);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          duration: const Duration(seconds: 2),
+                          content: Text(
+                            v
+                                ? 'Incognito on — you can discover others, but they can\'t see you'
+                                : 'Public — you are visible to people nearby',
+                          ),
+                        ),
+                      );
                     },
                   ),
                   IconButton(
                     icon: Icon(Icons.chat_bubble_outline_rounded,
                         color: accent),
-                    onPressed: () {},
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ConnectScreen(),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -285,6 +445,7 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
                         discoverable: _discoverable,
                         photoPath: hasPhoto ? photo : null,
                         nearby: _nearby.values.toList(growable: false),
+                        onPersonTap: (p) => _openProfile(context, p),
                       ),
                     ),
                   );
@@ -298,9 +459,11 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
               child: Column(
                 children: [
                   Text(
-                    _discoverable
-                        ? 'You are discoverable'
-                        : 'You are not discoverable',
+                    !_discoverable
+                        ? 'You are not discoverable'
+                        : (_incognito
+                            ? 'You are in incognito mode'
+                            : 'You are discoverable'),
                     style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
@@ -309,9 +472,11 @@ class _DiscoveryHomeScreenState extends State<DiscoveryHomeScreen> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    _discoverable
-                        ? 'Time Remaining: ${_format(_remaining)}'
-                        : 'Tap to connect with people nearby',
+                    !_discoverable
+                        ? 'Tap to connect with people nearby'
+                        : (_incognito
+                            ? 'Time Remaining: ${_format(_remaining)}  ·  Hidden from others'
+                            : 'Time Remaining: ${_format(_remaining)}'),
                     style: const TextStyle(
                       fontSize: 14,
                       color: Color(0xFF6B6B6B),
@@ -413,36 +578,20 @@ class _RadarArea extends StatefulWidget {
     required this.discoverable,
     required this.photoPath,
     required this.nearby,
+    this.onPersonTap,
   });
 
   final Color accent;
   final bool discoverable;
   final String? photoPath;
   final List<_NearbyPerson> nearby;
+  final void Function(_NearbyPerson)? onPersonTap;
 
   @override
   State<_RadarArea> createState() => _RadarAreaState();
 }
 
-class _RadarAreaState extends State<_RadarArea>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulse = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2400),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
+class _RadarAreaState extends State<_RadarArea> {
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -454,30 +603,43 @@ class _RadarAreaState extends State<_RadarArea>
           painter: _RingsPainter(accent: widget.accent),
         ),
 
-        // Animated pulse waves emanating from the centre avatar.
-        AnimatedBuilder(
-          animation: _pulse,
-          builder: (context, _) {
-            return CustomPaint(
-              size: Size.infinite,
-              painter: _PulsePainter(
-                accent: widget.accent,
-                progress: _pulse.value,
-              ),
-            );
-          },
+        // Animated ripple waves emanating from the centre, tinted to
+        // the current accent (red while idle, blue while active).
+        Positioned.fill(
+          child: ColorFiltered(
+            colorFilter: ColorFilter.mode(
+              widget.accent.withValues(alpha: 0.55),
+              BlendMode.srcIn,
+            ),
+            child: Lottie.asset(
+              'assets/animation/inward-ripple.json',
+              fit: BoxFit.contain,
+              repeat: true,
+            ),
+          ),
         ),
 
         // Centre avatar.
-        _CenterAvatar(accent: widget.accent, photoPath: widget.photoPath),
+        GestureDetector(
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const ProfileSettingsScreen(),
+            ),
+          ),
+          child: _CenterAvatar(
+              accent: widget.accent, photoPath: widget.photoPath),
+        ),
 
         // Nearby avatars (only when discoverable).
-        if (widget.discoverable) ..._buildNearby(context),
+        if (widget.discoverable) ..._buildNearby(context, widget.onPersonTap),
       ],
     );
   }
 
-  List<Widget> _buildNearby(BuildContext context) {
+  List<Widget> _buildNearby(
+    BuildContext context,
+    void Function(_NearbyPerson)? onPersonTap,
+  ) {
     if (widget.nearby.isEmpty) return const [];
     final positions = _fixedPositions(widget.nearby.length);
     final widgets = <Widget>[];
@@ -494,6 +656,7 @@ class _RadarAreaState extends State<_RadarArea>
             initials: avatar.initials,
             bg: avatar.color,
             meters: person.meters,
+            onTap: onPersonTap != null ? () => onPersonTap(person) : null,
           ),
         ),
       );
@@ -543,56 +706,7 @@ class _RingsPainter extends CustomPainter {
 
 /// Animated pulse waves expanding outward from the centre — gives the
 /// radar a "breathing" effect in both red (idle) and blue (active) modes.
-class _PulsePainter extends CustomPainter {
-  _PulsePainter({required this.accent, required this.progress});
-
-  final Color accent;
-  /// 0..1 looping progress driving the wave expansion.
-  final double progress;
-
-  /// How many concurrent pulse waves to draw, staggered evenly.
-  static const int _waveCount = 3;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final maxR = size.shortestSide / 2;
-    // Start each wave just outside the centre avatar (~55px radius).
-    const minR = 55.0;
-
-    for (var i = 0; i < _waveCount; i++) {
-      // Stagger this wave's progress so they don't overlap exactly.
-      final t = (progress + i / _waveCount) % 1.0;
-      final r = minR + (maxR - minR) * t;
-      // Fade out as the wave expands; also fade in at the very start.
-      final fadeIn = (t * 4).clamp(0.0, 1.0);
-      final fadeOut = 1.0 - t;
-      final alpha = (fadeIn * fadeOut * 0.55).clamp(0.0, 0.55);
-
-      // Stroke outline ring.
-      canvas.drawCircle(
-        center,
-        r,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.0
-          ..color = accent.withValues(alpha: alpha),
-      );
-      // Soft inner fill for the wave-front glow.
-      canvas.drawCircle(
-        center,
-        r,
-        Paint()
-          ..style = PaintingStyle.fill
-          ..color = accent.withValues(alpha: alpha * 0.08),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _PulsePainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.accent != accent;
-}
+// (Replaced by `Lottie.asset('assets/animation/ripple.json')` in `_RadarArea`.)
 
 class _CenterAvatar extends StatelessWidget {
   const _CenterAvatar({required this.accent, required this.photoPath});
@@ -641,16 +755,20 @@ class _NearbyAvatar extends StatelessWidget {
     required this.initials,
     required this.bg,
     required this.meters,
+    this.onTap,
   });
 
   final Color accent;
   final String initials;
   final Color bg;
   final double meters;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
@@ -696,6 +814,7 @@ class _NearbyAvatar extends StatelessWidget {
           ),
         ),
       ],
+    ),
     );
   }
 
@@ -712,37 +831,50 @@ class _IncognitoSwitch extends StatelessWidget {
     required this.onChanged,
   });
 
+  /// `true` = incognito (hidden from others), `false` = public (visible).
   final bool value;
   final Color accent;
   final ValueChanged<bool> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => onChanged(!value),
-      child: Container(
-        width: 56,
-        height: 28,
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          color: value ? const Color(0xFFE5C6B8) : accent.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Align(
-          alignment: value ? Alignment.centerLeft : Alignment.centerRight,
-          child: Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: value ? const Color(0xFF8B6B5B) : accent,
-            ),
-            child: Icon(
-              value
-                  ? Icons.visibility_off_outlined
-                  : Icons.visibility_outlined,
-              size: 14,
-              color: Colors.white,
+    // Incognito state uses a soft-rose pill; public uses the accent tint.
+    final trackColor = value
+        ? const Color(0xFFEAD0CB)
+        : accent.withValues(alpha: 0.20);
+    final knobColor =
+        value ? AppColors.brandRed : accent;
+    return Semantics(
+      label: value ? 'Incognito mode on' : 'Public mode on',
+      toggled: value,
+      child: GestureDetector(
+        onTap: () => onChanged(!value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: 58,
+          height: 30,
+          padding: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            color: trackColor,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Align(
+            alignment:
+                value ? Alignment.centerLeft : Alignment.centerRight,
+            child: Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white,
+              ),
+              child: Icon(
+                value
+                    ? Icons.visibility_off_rounded
+                    : Icons.visibility_rounded,
+                size: 16,
+                color: knobColor,
+              ),
             ),
           ),
         ),

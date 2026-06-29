@@ -41,16 +41,16 @@
 ## 📱 What Gets Built
 
 ### DEV Environment
-- **App Name:** "Will Cloud DEV"
-- **Android Package:** `com.nydsystems.digitalwill.dev`
-- **iOS Bundle ID:** `com.nydsystems.digitalwill.dev`
+- **App Name:** "Metafter DEV"
+- **Android Package:** `com.techinorm.metafter.dev`
+- **iOS Bundle ID:** `com.techinorm.metafter.dev`
 - **API Endpoint:** (configured in environment_config.dart)
 - **Debug Banner:** Visible
 
 ### UAT Environment
-- **App Name:** "Will Cloud UAT"
-- **Android Package:** `com.nydsystems.digitalwill.uat`
-- **iOS Bundle ID:** `com.nydsystems.digitalwill.uat`
+- **App Name:** "Metafter UAT"
+- **Android Package:** `com.techinorm.metafter.uat`
+- **iOS Bundle ID:** `com.techinorm.metafter.uat`
 - **API Endpoint:** (configured in environment_config.dart)
 - **Debug Banner:** Visible
 

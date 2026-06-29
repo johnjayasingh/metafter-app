@@ -28,9 +28,9 @@ The Android app is configured with three product flavors:
 - **prod**: Production environment
 
 ### Package IDs
-- Dev: `com.nydsystems.digitalwill.dev`
-- UAT: `com.nydsystems.digitalwill.uat`
-- Prod: `com.nydsystems.digitalwill`
+- Dev: `com.techinorm.metafter.dev`
+- UAT: `com.techinorm.metafter.uat`
+- Prod: `com.techinorm.metafter`
 
 ### Building Android Apps
 
@@ -38,25 +38,25 @@ The Android app is configured with three product flavors:
 ```bash
 ./build-flavors.sh android dev apk
 ```
-Output: `builds/android/dev/digitalwill-dev-[timestamp].apk`
+Output: `builds/android/dev/metafter-dev-[timestamp].apk`
 
 #### 2. Build UAT APK
 ```bash
 ./build-flavors.sh android uat apk
 ```
-Output: `builds/android/uat/digitalwill-uat-[timestamp].apk`
+Output: `builds/android/uat/metafter-uat-[timestamp].apk`
 
 #### 3. Build DEV AAB (for Play Store)
 ```bash
 ./build-flavors.sh android dev aab
 ```
-Output: `builds/android/dev/digitalwill-dev-[timestamp].aab`
+Output: `builds/android/dev/metafter-dev-[timestamp].aab`
 
 #### 4. Build UAT AAB (for Play Store)
 ```bash
 ./build-flavors.sh android uat aab
 ```
-Output: `builds/android/uat/digitalwill-uat-[timestamp].aab`
+Output: `builds/android/uat/metafter-uat-[timestamp].aab`
 
 ### Manual Flutter Commands (Alternative)
 
@@ -120,12 +120,12 @@ open Runner.xcworkspace
 3. Go to **Build Settings** tab
 4. Search for "Product Bundle Identifier"
 5. Set values for each configuration:
-   - Debug-dev: `com.nydsystems.digitalwill.dev`
-   - Release-dev: `com.nydsystems.digitalwill.dev`
-   - Debug-uat: `com.nydsystems.digitalwill.uat`
-   - Release-uat: `com.nydsystems.digitalwill.uat`
-   - Debug: `com.nydsystems.digitalwill`
-   - Release: `com.nydsystems.digitalwill`
+   - Debug-dev: `com.techinorm.metafter.dev`
+   - Release-dev: `com.techinorm.metafter.dev`
+   - Debug-uat: `com.techinorm.metafter.uat`
+   - Release-uat: `com.techinorm.metafter.uat`
+   - Debug: `com.techinorm.metafter`
+   - Release: `com.techinorm.metafter`
 
 ### Building iOS Apps
 
@@ -194,7 +194,7 @@ npm install -g firebase-tools
 firebase login
 
 # Upload APK
-firebase appdistribution:distribute builds/android/dev/digitalwill-dev.apk \
+firebase appdistribution:distribute builds/android/dev/metafter-dev.apk \
   --app YOUR_FIREBASE_APP_ID \
   --groups "dev-testers" \
   --release-notes "DEV build for testing"
@@ -226,20 +226,20 @@ Each environment has clear identifiers:
 
 ### Visual Indicators
 - **App Name**: 
-  - Dev: "Will Cloud DEV"
-  - UAT: "Will Cloud UAT"
-  - Prod: "Will Cloud"
+  - Dev: "Metafter DEV"
+  - UAT: "Metafter UAT"
+  - Prod: "Metafter"
 
 - **Title Bar** (in app):
-  - Dev: "Will Cloud [DEV]"
-  - UAT: "Will Cloud [UAT]"
-  - Prod: "Will Cloud"
+  - Dev: "Metafter [DEV]"
+  - UAT: "Metafter [UAT]"
+  - Prod: "Metafter"
 
 ### Package/Bundle IDs
-- Android Dev: `com.nydsystems.digitalwill.dev`
-- Android UAT: `com.nydsystems.digitalwill.uat`
-- iOS Dev: `com.nydsystems.digitalwill.dev`
-- iOS UAT: `com.nydsystems.digitalwill.uat`
+- Android Dev: `com.techinorm.metafter.dev`
+- Android UAT: `com.techinorm.metafter.uat`
+- iOS Dev: `com.techinorm.metafter.dev`
+- iOS UAT: `com.techinorm.metafter.uat`
 
 ## Testing the Setup
 

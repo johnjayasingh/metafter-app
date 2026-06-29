@@ -84,7 +84,7 @@ if [ "$PLATFORM" == "android" ]; then
         # Copy APK to builds directory
         mkdir -p builds/android/$ENVIRONMENT
         cp build/app/outputs/flutter-apk/app-$ENVIRONMENT-release.apk \
-           builds/android/$ENVIRONMENT/digitalwill-$ENVIRONMENT-$(date +%Y%m%d-%H%M%S).apk
+           builds/android/$ENVIRONMENT/metafter-$ENVIRONMENT-$(date +%Y%m%d-%H%M%S).apk
         
         print_info "✅ APK built successfully!"
         print_info "Location: builds/android/$ENVIRONMENT/"
@@ -96,7 +96,7 @@ if [ "$PLATFORM" == "android" ]; then
         # Copy AAB to builds directory
         mkdir -p builds/android/$ENVIRONMENT
         cp build/app/outputs/bundle/${ENVIRONMENT}Release/app-$ENVIRONMENT-release.aab \
-           builds/android/$ENVIRONMENT/digitalwill-$ENVIRONMENT-$(date +%Y%m%d-%H%M%S).aab
+           builds/android/$ENVIRONMENT/metafter-$ENVIRONMENT-$(date +%Y%m%d-%H%M%S).aab
         
         print_info "✅ App Bundle built successfully!"
         print_info "Location: builds/android/$ENVIRONMENT/"

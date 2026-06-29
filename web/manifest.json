@@ -1,11 +1,11 @@
 {
-    "name": "Will Cloud",
-    "short_name": "Will Cloud",
+    "name": "Metafter",
+    "short_name": "Metafter",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#1D4835",
     "theme_color": "#1D4835",
-    "description": "Will Cloud - Digital Will Management Application",
+    "description": "Metafter - Digital Will Management Application",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

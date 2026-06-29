@@ -31,11 +31,18 @@ class ConnectRequestsScreen extends StatefulWidget {
   const ConnectRequestsScreen({
     super.key,
     required this.requests,
+    this.onAccept,
+    this.onDecline,
   });
 
   /// The requests to display. A copy is made so dismissals don't affect
   /// the parent list.
   final List<dynamic> requests; // accepts _ConnectionRequest instances
+
+  /// Optional callbacks that notify the parent when an item is actioned
+  /// so the ConnectScreen list stays in sync.
+  final void Function(dynamic request)? onAccept;
+  final void Function(dynamic request)? onDecline;
 
   @override
   State<ConnectRequestsScreen> createState() => _ConnectRequestsScreenState();
@@ -45,7 +52,14 @@ class _ConnectRequestsScreenState extends State<ConnectRequestsScreen> {
   // Mirror the parent's request list
   late final List<dynamic> _items = List.of(widget.requests);
 
-  void _remove(dynamic item) => setState(() => _items.remove(item));
+  void _remove(dynamic item, {required bool accepted}) {
+    setState(() => _items.remove(item));
+    if (accepted) {
+      widget.onAccept?.call(item);
+    } else {
+      widget.onDecline?.call(item);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -93,8 +107,8 @@ class _ConnectRequestsScreenState extends State<ConnectRequestsScreen> {
                   company: r.company,
                   photoUrl: r.photoUrl,
                   isNearby: r.type.toString().contains('nearby'),
-                  onAccept: () => _remove(r),
-                  onDecline: () => _remove(r),
+                  onAccept: () => _remove(r, accepted: true),
+                  onDecline: () => _remove(r, accepted: false),
                 );
               },
             ),

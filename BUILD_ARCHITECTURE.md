@@ -45,10 +45,10 @@
 │  DEV                    UAT                   PRODUCTION         │
 │  ───────────────────────────────────────────────────────────    │
 │  Package:               Package:              Package:           │
-│  .digitalwill.dev       .digitalwill.uat      .digitalwill       │
+│  .metafter.dev       .metafter.uat      .metafter       │
 │                                                                  │
 │  App Name:              App Name:             App Name:          │
-│  "Will Cloud DEV"       "Will Cloud UAT"      "Will Cloud"       │
+│  "Metafter DEV"       "Metafter UAT"      "Metafter"       │
 │                                                                  │
 │  Command:               Command:              Command:           │
 │  flutter build apk      flutter build apk     flutter build apk  │
@@ -64,10 +64,10 @@
 │  DEV                    UAT                   PRODUCTION         │
 │  ───────────────────────────────────────────────────────────    │
 │  Bundle ID:             Bundle ID:            Bundle ID:         │
-│  .digitalwill.dev       .digitalwill.uat      .digitalwill       │
+│  .metafter.dev       .metafter.uat      .metafter       │
 │                                                                  │
 │  Display Name:          Display Name:         Display Name:      │
-│  "Will Cloud DEV"       "Will Cloud UAT"      "Will Cloud"       │
+│  "Metafter DEV"       "Metafter UAT"      "Metafter"       │
 │                                                                  │
 │  Scheme:                Scheme:               Scheme:            │
 │  dev                    uat                   Runner             │
@@ -111,9 +111,9 @@
     │         builds/ directory                   │
     │  ├── android/                               │
     │  │   ├── dev/                               │
-    │  │   │   └── digitalwill-dev-timestamp.apk │
+    │  │   │   └── metafter-dev-timestamp.apk │
     │  │   └── uat/                               │
-    │  │       └── digitalwill-uat-timestamp.apk │
+    │  │       └── metafter-uat-timestamp.apk │
     │  └── ios/                                   │
     └────────────────────────────────────────────┘
            │                                 │

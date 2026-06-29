@@ -5,23 +5,23 @@
 Your Xcode workspace now has separate schemes for each flavor:
 
 ### 1. **Runner** (Production)
-- Bundle ID: `com.nydco.digitalwill`
-- Display Name: "Will Cloud"
+- Bundle ID: `com.techinorm.metafter`
+- Display Name: "Metafter"
 - Configurations:
   - Debug → Production
   - Release → Production  
   - Profile → Production
 
 ### 2. **Runner-DEV** (Development)
-- Bundle ID: `com.nydco.digitalwill.dev`
-- Display Name: "Will Cloud DEV"
+- Bundle ID: `com.techinorm.metafter.dev`
+- Display Name: "Metafter DEV"
 - Configurations:
   - Debug-dev
   - Release-dev
 
 ### 3. **Runner-UAT** (UAT)
-- Bundle ID: `com.nydco.digitalwill.uat`
-- Display Name: "Will Cloud UAT"
+- Bundle ID: `com.techinorm.metafter.uat`
+- Display Name: "Metafter UAT"
 - Configurations:
   - Debug-uat
   - Release-uat

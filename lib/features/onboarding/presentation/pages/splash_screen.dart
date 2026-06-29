@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/routes/app_router.dart';
@@ -39,12 +40,18 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: _SplashBackground(
-        child: Center(
-          child: MetafterLogo(
-            variant: MetafterLogoVariant.white,
-            height: 36,
+    // The dolphin + ripple mark sits at roughly half the screen width.
+    final logoSize = MediaQuery.of(context).size.shortestSide * 0.46;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: AppColors.brandBlack,
+        body: _SplashBackground(
+          child: Center(
+            child: MetafterLogo(
+              variant: MetafterLogoVariant.white,
+              height: logoSize,
+            ),
           ),
         ),
       ),
@@ -60,18 +67,7 @@ class _SplashBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          stops: [0.0, 0.55, 1.0],
-          colors: [
-            AppColors.brandRedDeep,
-            AppColors.brandRed,
-            AppColors.brandRedSoft,
-          ],
-        ),
-      ),
+      decoration: const BoxDecoration(gradient: AppColors.brandSunset),
       child: SafeArea(child: child),
     );
   }

@@ -34,9 +34,9 @@ Three separate, installable apps:
 
 | Environment | Package/Bundle ID | App Name | API |
 |------------|-------------------|----------|-----|
-| **DEV** | com.nydsystems.digitalwill.dev | Will Cloud DEV | dev-api.yourcompany.com |
-| **UAT** | com.nydsystems.digitalwill.uat | Will Cloud UAT | uat-api.yourcompany.com |
-| **PROD** | com.nydsystems.digitalwill | Will Cloud | api.yourcompany.com |
+| **DEV** | com.techinorm.metafter.dev | Metafter DEV | dev-api.yourcompany.com |
+| **UAT** | com.techinorm.metafter.uat | Metafter UAT | uat-api.yourcompany.com |
+| **PROD** | com.techinorm.metafter | Metafter | api.yourcompany.com |
 
 ✅ All three can be installed simultaneously on the same device!
 

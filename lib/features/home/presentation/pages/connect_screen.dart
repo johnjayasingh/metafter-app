@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import 'all_messages_screen.dart';
 import 'chat_screen.dart';
 import 'connect_requests_screen.dart';
 import 'connected_profile_screen.dart';
@@ -27,24 +28,7 @@ class _ConnectionRequest {
   final _RequestType type;
 }
 
-class _Message {
-  const _Message({
-    required this.id,
-    required this.name,
-    required this.photoUrl,
-    required this.lastMessage,
-    required this.timeAgo,
-    required this.isFromMe,
-    required this.dotColor,
-  });
-  final String id;
-  final String name;
-  final String photoUrl;
-  final String lastMessage;
-  final String timeAgo;
-  final bool isFromMe;
-  final Color dotColor;
-}
+// Use the public MessageItem from all_messages_screen.dart
 
 const _mockRequests = <_ConnectionRequest>[
   _ConnectionRequest(
@@ -73,8 +57,8 @@ const _mockRequests = <_ConnectionRequest>[
   ),
 ];
 
-const _mockMessages = <_Message>[
-  _Message(
+const _mockMessages = <MessageItem>[
+  MessageItem(
     id: 'm1',
     name: 'Candice Wue',
     photoUrl: 'https://i.pravatar.cc/150?img=45',
@@ -83,7 +67,7 @@ const _mockMessages = <_Message>[
     isFromMe: true,
     dotColor: Color(0xFF119BFB),
   ),
-  _Message(
+  MessageItem(
     id: 'm2',
     name: 'Zahir Mays',
     photoUrl: 'https://i.pravatar.cc/150?img=11',
@@ -92,7 +76,7 @@ const _mockMessages = <_Message>[
     isFromMe: true,
     dotColor: Color(0xFF7C3AED),
   ),
-  _Message(
+  MessageItem(
     id: 'm3',
     name: 'Rane Wells',
     photoUrl: 'https://i.pravatar.cc/150?img=48',
@@ -101,7 +85,7 @@ const _mockMessages = <_Message>[
     isFromMe: false,
     dotColor: AppColors.brandRed,
   ),
-  _Message(
+  MessageItem(
     id: 'm4',
     name: 'Sophia Ramirez',
     photoUrl: 'https://i.pravatar.cc/150?img=46',
@@ -110,7 +94,7 @@ const _mockMessages = <_Message>[
     isFromMe: false,
     dotColor: AppColors.brandRed,
   ),
-  _Message(
+  MessageItem(
     id: 'm5',
     name: 'Jasmine',
     photoUrl: 'https://i.pravatar.cc/150?img=44',
@@ -119,7 +103,7 @@ const _mockMessages = <_Message>[
     isFromMe: false,
     dotColor: Color(0xFF119BFB),
   ),
-  _Message(
+  MessageItem(
     id: 'm6',
     name: 'Liam Chen',
     photoUrl: 'https://i.pravatar.cc/150?img=15',
@@ -174,7 +158,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
             title: 'Connection Request',
             onSeeAll: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
-                builder: (_) => ConnectRequestsScreen(requests: _requests),
+                builder: (_) => ConnectRequestsScreen(
+                  requests: _requests,
+                  onAccept: (r) => _accept(r.id as String),
+                  onDecline: (r) => _decline(r.id as String),
+                ),
               ),
             ),
           ),
@@ -196,8 +184,15 @@ class _ConnectScreenState extends State<ConnectScreen> {
           const SizedBox(height: 8),
 
           // ── Messages ──
-          _SectionHeader(title: 'Messages', onSeeAll: () {}),
-          ..._mockMessages.map((m) => _MessageTile(message: m)),
+          _SectionHeader(
+            title: 'Messages',
+            onSeeAll: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => AllMessagesScreen(messages: _mockMessages),
+              ),
+            ),
+          ),
+          ..._mockMessages.take(4).map((m) => _MessageTile(message: m)),
           const SizedBox(height: 24),
         ],
       ),
@@ -352,7 +347,7 @@ class _RequestTile extends StatelessWidget {
 
 class _MessageTile extends StatelessWidget {
   const _MessageTile({required this.message});
-  final _Message message;
+  final MessageItem message;
 
   @override
   Widget build(BuildContext context) {

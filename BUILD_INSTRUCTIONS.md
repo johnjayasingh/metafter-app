@@ -5,20 +5,20 @@
 The app now has proper support for multiple build flavors with different bundle IDs and display names:
 
 ### Production
-- **Bundle ID:** `com.nydco.digitalwill`
-- **Display Name:** "Will Cloud"
+- **Bundle ID:** `com.techinorm.metafter`
+- **Display Name:** "Metafter"
 - **Entry Point:** `lib/main.dart`
 - **Configurations:** Debug, Release, Profile
 
 ### Development (DEV)
-- **Bundle ID:** `com.nydco.digitalwill.dev`
-- **Display Name:** "Will Cloud DEV"
+- **Bundle ID:** `com.techinorm.metafter.dev`
+- **Display Name:** "Metafter DEV"
 - **Entry Point:** `lib/main_dev.dart`
 - **Configurations:** Debug-dev, Release-dev
 
 ### UAT
-- **Bundle ID:** `com.nydco.digitalwill.uat`
-- **Display Name:** "Will Cloud UAT"  
+- **Bundle ID:** `com.techinorm.metafter.uat`
+- **Display Name:** "Metafter UAT"  
 - **Entry Point:** `lib/main_uat.dart`
 - **Configurations:** Debug-uat, Release-uat
 
@@ -50,7 +50,7 @@ The app now has proper support for multiple build flavors with different bundle 
 ./build-appstore.sh
 ```
 
-**Note:** All IPAs are output to `build/ios/ipa/digitalwill.ipa`
+**Note:** All IPAs are output to `build/ios/ipa/metafter.ipa`
 
 ### Option 2: Using Xcode Directly
 
@@ -85,7 +85,7 @@ xcodebuild -exportArchive \
 
 ### Method 1: Apple Transporter (Recommended)
 1. Open Apple Transporter app (download from Mac App Store if needed)
-2. Drag and drop `build/ios/ipa/digitalwill.ipa` into the app
+2. Drag and drop `build/ios/ipa/metafter.ipa` into the app
 3. Click "Deliver" to upload to App Store Connect
 4. Wait 15-30 minutes for Apple to process the build
 5. Go to App Store Connect → TestFlight to add testers
@@ -94,19 +94,19 @@ xcodebuild -exportArchive \
 4. **Verifying Built IPA** - To check that the IPA has correct bundle ID and display name:
 
 ```bash
-unzip -p build/ios/ipa/digitalwill.ipa "Payload/Runner.app/Info.plist" | plutil -p - | grep -E "CFBundleIdentifier|CFBundleDisplayName"
+unzip -p build/ios/ipa/metafter.ipa "Payload/Runner.app/Info.plist" | plutil -p - | grep -E "CFBundleIdentifier|CFBundleDisplayName"
 ```
 
 Should output for DEV:
 ```
-"CFBundleDisplayName" => "Will Cloud DEV"
-"CFBundleIdentifier" => "com.nydco.digitalwill.dev"
+"CFBundleDisplayName" => "Metafter DEV"
+"CFBundleIdentifier" => "com.techinorm.metafter.dev"
 ```
 
 Should output for UAT:
 ```
-"CFBundleDisplayName" => "Will Cloud UAT"
-"CFBundleIdentifier" => "com.nydco.digitalwill.uat"
+"CFBundleDisplayName" => "Metafter UAT"
+"CFBundleIdentifier" => "com.techinorm.metafter.uat"
 ```bash
 cd ios && ./restore-flavor-configs.sh
 ```
@@ -124,8 +124,8 @@ cd ios && xcodebuild -workspace Runner.xcworkspace \
 
 Should output:
 ```
-DISPLAY_NAME = Will Cloud DEV
-PRODUCT_BUNDLE_IDENTIFIER = com.nydco.digitalwill.dev
+DISPLAY_NAME = Metafter DEV
+PRODUCT_BUNDLE_IDENTIFIER = com.techinorm.metafter.dev
 ```
 
 ## Troubleshooting

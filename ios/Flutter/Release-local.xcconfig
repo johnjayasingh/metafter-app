@@ -1,5 +1,5 @@
 #include "Release.xcconfig"
-DISPLAY_NAME = Will Cloud LOCAL
-PRODUCT_BUNDLE_IDENTIFIER = com.nydco.digitalwill.local
+DISPLAY_NAME = Metafter LOCAL
+PRODUCT_BUNDLE_IDENTIFIER = com.techinorm.metafter.local
 FLUTTER_BUILD_MODE = release
 FLUTTER_TARGET = lib/main_local.dart

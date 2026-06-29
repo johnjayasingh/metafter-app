@@ -36,25 +36,17 @@ const _todayEncounters = <_EncounteredPerson>[
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 class DiscoverHistoryScreen extends StatelessWidget {
-  const DiscoverHistoryScreen({super.key});
+  const DiscoverHistoryScreen({super.key, this.embedded = false});
+
+  /// When `true`, render the body only (no Scaffold/AppBar) so the screen can
+  /// be hosted inside the swipeable [HomeShell] under its shared header.
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: const Text('Discover', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.black)),
-        centerTitle: true,
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
             child: Row(
@@ -81,7 +73,23 @@ class DiscoverHistoryScreen extends StatelessWidget {
             ),
           ),
         ],
+      );
+
+    if (embedded) return ColoredBox(color: Colors.white, child: body);
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black, size: 20),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: const Text('Discover', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.black)),
+        centerTitle: true,
       ),
+      body: body,
     );
   }
 }

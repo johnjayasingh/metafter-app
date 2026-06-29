@@ -10,8 +10,23 @@ class AppColors {
   static const Color brandRedSoft = Color(0xFFFCE4E1);
   /// Onboarding "Get Started" button color.
   static const Color brandButton = Color(0xFFE32227);
+  /// Coral red CTA used over the dark onboarding gradient.
+  static const Color brandCoral = Color(0xFFE54B4B);
+  /// Pure black at the bottom of the splash / onboarding gradient.
+  static const Color brandBlack = Color(0xFF000000);
+  /// Muted gray for secondary text sitting on the dark gradient.
+  static const Color textOnDarkMuted = Color(0xFF9A9A9A);
   /// Discovery "active / discoverable" blue accent.
   static const Color discoverActive = Color(0xFF119BFB);
+
+  /// Brand "sunset" gradient — vivid red fading to black.
+  /// Shared by the splash and onboarding screens.
+  static const LinearGradient brandSunset = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    stops: [0.0, 0.32, 0.85, 1.0],
+    colors: [brandRed, brandRed, brandBlack, brandBlack],
+  );
 
   // Primary gradient colors
   static const Color primaryMint = Color(0xFFB8E6D5);

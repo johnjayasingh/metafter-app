@@ -1,5 +1,5 @@
 #include "Debug.xcconfig"
-DISPLAY_NAME = Will Cloud DEV
-PRODUCT_BUNDLE_IDENTIFIER = com.nydco.digitalwill.dev
+DISPLAY_NAME = Metafter DEV
+PRODUCT_BUNDLE_IDENTIFIER = com.techinorm.metafter.dev
 FLUTTER_BUILD_MODE = debug
 FLUTTER_TARGET = lib/main_dev.dart

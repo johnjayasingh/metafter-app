@@ -17,8 +17,8 @@ Builds a DEV APK that can be installed directly on devices for testing.
 
 **Output:**
 - File: `build/app/outputs/flutter-apk/app-dev-release.apk` (38.5MB)
-- Package ID: `com.nydsystems.digitalwill.dev`
-- App Name: "Will Cloud DEV"
+- Package ID: `com.techinorm.metafter.dev`
+- App Name: "Metafter DEV"
 
 **Installation:**
 ```bash
@@ -38,8 +38,8 @@ Builds a DEV App Bundle for uploading to Google Play Console (Internal/Alpha/Bet
 
 **Output:**
 - File: `build/app/outputs/bundle/devRelease/app-dev-release.aab` (55MB)
-- Package ID: `com.nydsystems.digitalwill.dev`
-- App Name: "Will Cloud DEV"
+- Package ID: `com.techinorm.metafter.dev`
+- App Name: "Metafter DEV"
 
 **Upload to Play Console:**
 1. Go to https://play.google.com/console
@@ -61,8 +61,8 @@ Builds a UAT APK for user acceptance testing on devices.
 
 **Output:**
 - File: `build/app/outputs/flutter-apk/app-uat-release.apk` (38.5MB)
-- Package ID: `com.nydsystems.digitalwill.uat`
-- App Name: "Will Cloud UAT"
+- Package ID: `com.techinorm.metafter.uat`
+- App Name: "Metafter UAT"
 
 **Installation:**
 ```bash
@@ -82,8 +82,8 @@ Builds a UAT App Bundle for uploading to Google Play Console testing tracks.
 
 **Output:**
 - File: `build/app/outputs/bundle/uatRelease/app-uat-release.aab` (55MB)
-- Package ID: `com.nydsystems.digitalwill.uat`
-- App Name: "Will Cloud UAT"
+- Package ID: `com.techinorm.metafter.uat`
+- App Name: "Metafter UAT"
 
 **Upload to Play Console:**
 1. Go to https://play.google.com/console
@@ -105,8 +105,8 @@ Builds a Production APK for final testing before Play Store release.
 
 **Output:**
 - File: `build/app/outputs/flutter-apk/app-prod-release.apk` (38.5MB)
-- Package ID: `com.nydsystems.digitalwill`
-- App Name: "Will Cloud"
+- Package ID: `com.techinorm.metafter`
+- App Name: "Metafter"
 
 **Installation:**
 ```bash
@@ -124,8 +124,8 @@ Builds the Production App Bundle for uploading to Google Play Console Production
 
 **Output:**
 - File: `build/app/outputs/bundle/prodRelease/app-prod-release.aab` (55MB)
-- Package ID: `com.nydsystems.digitalwill`
-- App Name: "Will Cloud"
+- Package ID: `com.techinorm.metafter`
+- App Name: "Metafter"
 
 **Upload to Play Console:**
 1. Go to https://play.google.com/console

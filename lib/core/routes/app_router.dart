@@ -1,6 +1,6 @@
 import 'package:go_router/go_router.dart';
 
-import '../../features/home/presentation/pages/discovery_home_screen.dart';
+import '../../features/home/presentation/pages/home_shell.dart';
 import '../../features/onboarding/presentation/pages/onboarding_screen.dart';
 import '../../features/onboarding/presentation/pages/splash_screen.dart';
 import '../../features/signup/presentation/pages/signup_basics_screen.dart';
@@ -47,7 +47,7 @@ class AppRouter {
       ),
       GoRoute(
         path: home,
-        builder: (context, state) => const DiscoveryHomeScreen(),
+        builder: (context, state) => const HomeShell(),
       ),
       GoRoute(
         path: signupBasics,

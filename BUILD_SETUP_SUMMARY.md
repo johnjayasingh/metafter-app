@@ -87,9 +87,9 @@ All three environments can be installed **simultaneously** on the same device:
 
 | Environment | Android Package | iOS Bundle | App Name |
 |------------|----------------|------------|----------|
-| DEV | com.nydsystems.digitalwill.dev | com.nydsystems.digitalwill.dev | Will Cloud DEV |
-| UAT | com.nydsystems.digitalwill.uat | com.nydsystems.digitalwill.uat | Will Cloud UAT |
-| PROD | com.nydsystems.digitalwill | com.nydsystems.digitalwill | Will Cloud |
+| DEV | com.techinorm.metafter.dev | com.techinorm.metafter.dev | Metafter DEV |
+| UAT | com.techinorm.metafter.uat | com.techinorm.metafter.uat | Metafter UAT |
+| PROD | com.techinorm.metafter | com.techinorm.metafter | Metafter |
 
 ### Different Configurations
 - Separate API endpoints per environment
@@ -144,7 +144,7 @@ Yes! Just run the commands separately:
 - **App Store:** Need separate listings for different bundle IDs (or use TestFlight)
 
 ### How do testers distinguish between versions?
-- Different app names: "Will Cloud DEV" vs "Will Cloud UAT"
+- Different app names: "Metafter DEV" vs "Metafter UAT"
 - Different app icons (can be configured)
 - Shows in different locations on home screen
 

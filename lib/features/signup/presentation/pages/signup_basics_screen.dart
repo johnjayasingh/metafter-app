@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl_phone_field/phone_number.dart';
 
+import '../../../../core/auth/cognito_auth_service.dart';
 import '../../../../core/routes/app_router.dart';
 import '../../data/signup_draft.dart';
 import '../../data/signup_validators.dart';
@@ -30,6 +31,7 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
   String _dialCode = '+91';
   String _isoCode = 'IN';
   bool _phoneValid = false;
+  bool _submitting = false;
 
   @override
   void initState() {
@@ -63,8 +65,8 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
 
   bool get _isValid => _nameError == null && _phoneError == null;
 
-  void _onNext() {
-    if (!_isValid) {
+  Future<void> _onNext() async {
+    if (!_isValid || _submitting) {
       setState(() => _showErrors = true);
       return;
     }
@@ -73,7 +75,25 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
       _draft.phone = _phone.text.trim();
       _draft.countryCode = _dialCode;
     });
-    context.push(AppRouter.signupOtp);
+
+    setState(() => _submitting = true);
+    final e164 = '$_dialCode${_phone.text.trim()}';
+    try {
+      // Register the number if new, then start CUSTOM_AUTH so the backend
+      // sends the SMS OTP. The pending Cognito session is held in-memory for
+      // the OTP screen to answer.
+      await CognitoAuthService.instance.signUpWithPhone(e164);
+      await CognitoAuthService.instance.startSignIn(e164);
+      if (mounted) context.push(AppRouter.signupOtp);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not send code. $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   @override
@@ -81,8 +101,8 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
     return SignupScaffold(
       title: 'What should I call you?',
       bottomButton: MetafterPrimaryButton(
-        label: 'Next',
-        onPressed: _isValid ? _onNext : null,
+        label: _submitting ? 'Sending code…' : 'Next',
+        onPressed: (_isValid && !_submitting) ? _onNext : null,
       ),
       child: Column(
         children: [

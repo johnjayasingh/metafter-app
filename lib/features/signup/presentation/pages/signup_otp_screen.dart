@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/auth/cognito_auth_service.dart';
 import '../../../../core/routes/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/signup_draft.dart';
@@ -36,13 +37,33 @@ class _SignupOtpScreenState extends State<SignupOtpScreen> {
     super.dispose();
   }
 
+  bool _verifying = false;
+
   String get _code => _controller.text;
 
   bool get _complete => _code.length == _length;
 
-  void _onContinue() {
-    // TODO: call backend verify-otp endpoint with _code.
-    context.push(AppRouter.signupProfile);
+  Future<void> _onContinue() async {
+    if (!_complete || _verifying) return;
+    setState(() => _verifying = true);
+    try {
+      final ok = await CognitoAuthService.instance.answerOtp(_code);
+      if (!mounted) return;
+      if (ok) {
+        context.push(AppRouter.signupProfile);
+        return;
+      }
+      _showError('That code didn\'t match. Try again.');
+    } catch (_) {
+      if (mounted) _showError('Incorrect or expired code. Request a new one.');
+    } finally {
+      if (mounted) setState(() => _verifying = false);
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -74,8 +95,8 @@ class _SignupOtpScreenState extends State<SignupOtpScreen> {
         ),
       ),
       bottomButton: MetafterPrimaryButton(
-        label: 'Continue',
-        onPressed: _complete ? _onContinue : null,
+        label: _verifying ? 'Verifying…' : 'Continue',
+        onPressed: (_complete && !_verifying) ? _onContinue : null,
       ),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,

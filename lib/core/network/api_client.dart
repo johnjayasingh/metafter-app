@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'api_endpoints.dart';
 import 'api_exceptions.dart';
-import '../storage/secure_storage_service.dart';
+import '../auth/cognito_auth_service.dart';
 
 class ApiClient {
   static final ApiClient _instance = ApiClient._internal();
@@ -9,9 +9,8 @@ class ApiClient {
   ApiClient._internal();
 
   late Dio _dio;
-  final SecureStorageService _storage = SecureStorageService();
-  int _tokenRefreshAttempts = 0;
-  static const int _maxRefreshAttempts = 3;
+  final CognitoAuthService _auth = CognitoAuthService.instance;
+  bool _retriedAuth = false;
   Function()? onSessionTimeout;
 
   void initialize() {
@@ -41,8 +40,9 @@ class ApiClient {
     RequestOptions options,
     RequestInterceptorHandler handler,
   ) async {
-    // Add auth token to requests if available
-    final token = await _storage.getAccessToken();
+    // Attach the Cognito ID token (the API Gateway authorizer + handlers
+    // read claims.sub from it). getSession() refreshes silently if expired.
+    final token = await _auth.idToken();
     if (token != null && token.isNotEmpty) {
       options.headers['Authorization'] = 'Bearer $token';
     }
@@ -75,89 +75,32 @@ class ApiClient {
       print('📦 ERROR DATA: ${error.response?.data}');
     }
 
-    // Handle token refresh on 401
-    if (error.response?.statusCode == 401) {
-      // If no refresh token exists, immediately trigger session timeout
-      // (no point retrying — the user must re-authenticate)
-      final refreshToken = await _storage.getRefreshToken();
-      if (refreshToken == null || refreshToken.isEmpty) {
-        print('❌ No refresh token available. Session timeout.');
-        _tokenRefreshAttempts = 0;
-        await _storage.clearTokens();
-        if (onSessionTimeout != null) {
-          onSessionTimeout!();
-        }
-        return handler.next(error);
-      }
-
-      // Check if we've already tried too many times
-      if (_tokenRefreshAttempts >= _maxRefreshAttempts) {
-        print('❌ Max token refresh attempts reached. Session timeout.');
-        _tokenRefreshAttempts = 0; // Reset counter
-        await _storage.clearTokens();
-        if (onSessionTimeout != null) {
-          onSessionTimeout!();
-        }
-        return handler.next(error);
-      }
-
-      _tokenRefreshAttempts++;
-      print('🔄 Token refresh attempt $_tokenRefreshAttempts of $_maxRefreshAttempts');
-
+    // Handle auth failure on 401. Cognito's getSession() already refreshes
+    // silently, so a 401 means the session is genuinely invalid/expired.
+    // Try one forced re-fetch of the ID token and retry the request once;
+    // if that still yields no valid token, time the session out.
+    if (error.response?.statusCode == 401 && !_retriedAuth) {
+      _retriedAuth = true;
       try {
-        final refreshed = await _refreshToken();
-        if (refreshed) {
-          _tokenRefreshAttempts = 0; // Reset on successful refresh
-          // Retry the original request
+        final token = await _auth.idToken();
+        if (token != null && token.isNotEmpty) {
+          error.requestOptions.headers['Authorization'] = 'Bearer $token';
           final response = await _dio.fetch(error.requestOptions);
+          _retriedAuth = false;
           return handler.resolve(response);
-        } else {
-          // Refresh failed — trigger session timeout immediately
-          print('❌ Token refresh failed. Session timeout.');
-          _tokenRefreshAttempts = 0;
-          await _storage.clearTokens();
-          if (onSessionTimeout != null) {
-            onSessionTimeout!();
-          }
         }
-      } catch (e) {
-        // Refresh threw an exception — trigger session timeout immediately
-        print('❌ Token refresh exception. Session timeout.');
-        _tokenRefreshAttempts = 0;
-        await _storage.clearTokens();
-        if (onSessionTimeout != null) {
-          onSessionTimeout!();
-        }
+      } catch (_) {
+        // fall through to session timeout
+      }
+      _retriedAuth = false;
+      print('❌ No valid Cognito session. Session timeout.');
+      await _auth.signOut();
+      if (onSessionTimeout != null) {
+        onSessionTimeout!();
       }
     }
 
     return handler.next(error);
-  }
-
-  Future<bool> _refreshToken() async {
-    try {
-      final refreshToken = await _storage.getRefreshToken();
-      if (refreshToken == null || refreshToken.isEmpty) {
-        return false;
-      }
-
-      final response = await _dio.post(
-        ApiEndpoints.refreshToken,
-        data: {'refresh_token': refreshToken},
-      );
-
-      if (response.statusCode == 200 && response.data['status'] == 'success') {
-        final data = response.data['data'];
-        await _storage.saveAccessToken(data['access_token']);
-        if (data['refresh_token'] != null) {
-          await _storage.saveRefreshToken(data['refresh_token']);
-        }
-        return true;
-      }
-      return false;
-    } catch (e) {
-      return false;
-    }
   }
 
   Future<Response<T>> get<T>(

@@ -9,6 +9,7 @@ class ApiEndpoints {
 
   static String get baseUrl => EnvironmentConfig.baseUrl;
 
-  // Auth (add as needed)
-  static const String refreshToken = '/user/refresh-token';
+  // --- Profile ---
+  static const String profile = '/profile';
+  static const String photoUploadUrl = '/profile/photo-upload-url';
 }

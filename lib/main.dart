@@ -26,6 +26,14 @@ Future<void> bootstrap({
   EnvironmentConfig.setEnvironment(environment);
   ApiClient().initialize();
 
+  // When the Cognito session can't be refreshed, send the user back to the
+  // phone entry to re-authenticate (signUpWithPhone is idempotent, so the
+  // same screens serve both first-time signup and returning-user login).
+  ApiClient().onSessionTimeout = () async {
+    await SignupDraft.instance.signOut();
+    AppRouter.router.go(AppRouter.signupBasics);
+  };
+
   // Restore any previously-persisted signup draft (keeps the user signed
   // in across launches).
   await SignupDraft.instance.load();

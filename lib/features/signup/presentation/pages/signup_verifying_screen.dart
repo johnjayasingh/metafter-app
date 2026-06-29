@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/network/profile_api.dart';
 import '../../../../core/routes/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/signup_draft.dart';
@@ -23,6 +25,7 @@ class SignupVerifyingScreen extends StatefulWidget {
 class _SignupVerifyingScreenState extends State<SignupVerifyingScreen> {
   Timer? _timer;
   bool _verified = false;
+  bool _submitting = false;
 
   @override
   void initState() {
@@ -40,9 +43,33 @@ class _SignupVerifyingScreenState extends State<SignupVerifyingScreen> {
     super.dispose();
   }
 
-  void _onDone() async {
+  Future<void> _onDone() async {
+    if (_submitting) return;
+    setState(() => _submitting = true);
+    final draft = SignupDraft.instance;
+
+    // Push the collected profile to the backend now that the user is authed.
+    // Best-effort: a sync hiccup shouldn't trap the user on this screen.
+    try {
+      await ProfileApi().putProfile(
+        displayName: draft.name,
+        headline: draft.designation.isNotEmpty ? draft.designation : draft.role,
+        company: draft.company,
+        bio: draft.introduction,
+      );
+      if (draft.photoPath != null && draft.photoPath!.isNotEmpty) {
+        await ProfileApi().uploadPhoto(File(draft.photoPath!));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Profile will finish syncing later. $e')),
+        );
+      }
+    }
+
     // Persist the signup so the user stays signed in across launches.
-    await SignupDraft.instance.save();
+    await draft.save();
     if (!mounted) return;
     context.go(AppRouter.home);
   }
@@ -54,8 +81,10 @@ class _SignupVerifyingScreenState extends State<SignupVerifyingScreen> {
         '${draft.company.isEmpty ? "" : " - ${draft.company}"}';
     return SignupScaffold(
       title: _verified ? 'Verified!' : 'Verifying..',
-      bottomButton:
-          MetafterPrimaryButton(label: 'Done', onPressed: _onDone),
+      bottomButton: MetafterPrimaryButton(
+        label: _submitting ? 'Finishing…' : 'Done',
+        onPressed: _submitting ? null : _onDone,
+      ),
       child: Column(
         children: [
           const SizedBox(height: 24),

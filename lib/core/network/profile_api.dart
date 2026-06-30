@@ -46,4 +46,55 @@ class ProfileApi {
       ),
     );
   }
+
+  /// POST /v1/profile/liveness-session — opens a Rekognition Face Liveness
+  /// session and returns its id for the native liveness UI to stream into.
+  Future<String> createLivenessSession() async {
+    final res = await _api.post(ApiEndpoints.livenessSession);
+    final id = res.data['sessionId'] as String?;
+    if (id == null || id.isEmpty) {
+      throw StateError('liveness-session returned no sessionId');
+    }
+    return id;
+  }
+
+  /// POST /v1/profile/verify-identity — server resolves the liveness result and
+  /// matches the captured frame against the stored profile photo.
+  Future<IdentityVerificationResult> verifyIdentity(String sessionId) async {
+    final res = await _api.post(
+      ApiEndpoints.verifyIdentity,
+      data: {'sessionId': sessionId},
+    );
+    final d = (res.data as Map).cast<String, dynamic>();
+    return IdentityVerificationResult(
+      verified: d['verified'] as bool? ?? false,
+      status: d['status'] as String? ?? 'failed',
+      reason: d['reason'] as String?,
+      livenessConfidence: (d['livenessConfidence'] as num?)?.toDouble(),
+      faceSimilarity: (d['faceSimilarity'] as num?)?.toDouble(),
+    );
+  }
+}
+
+/// Outcome of the backend identity-verification call.
+class IdentityVerificationResult {
+  const IdentityVerificationResult({
+    required this.verified,
+    required this.status,
+    this.reason,
+    this.livenessConfidence,
+    this.faceSimilarity,
+  });
+
+  /// `true` only when the subject was live AND matched the profile photo.
+  final bool verified;
+
+  /// `'verified' | 'failed' | 'pending'`.
+  final String status;
+
+  /// `'liveness_failed' | 'face_mismatch'` when not verified.
+  final String? reason;
+
+  final double? livenessConfidence;
+  final double? faceSimilarity;
 }

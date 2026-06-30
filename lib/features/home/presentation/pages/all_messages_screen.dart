@@ -220,7 +220,7 @@ class _MessageTile extends StatelessWidget {
                       width: 56,
                       height: 56,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
+                      errorBuilder: (_, _, _) =>
                           _InitialCircle(name: message.name),
                     ),
                   ),

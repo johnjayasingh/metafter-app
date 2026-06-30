@@ -37,6 +37,14 @@ class SignupDraft extends ChangeNotifier {
   /// Local file path / data uri of the captured selfie.
   String? selfiePath;
 
+  /// Rekognition Face Liveness session id from the most recent verification
+  /// attempt. In-memory only (transient to the signup flow).
+  String? livenessSessionId;
+
+  /// `true` once the profile photo has been uploaded to S3 this session, so we
+  /// don't re-upload it. In-memory only.
+  bool photoUploaded = false;
+
   /// `true` once the user has completed the signup flow at least once.
   bool isOnboarded = false;
 
@@ -110,6 +118,8 @@ class SignupDraft extends ChangeNotifier {
     introduction = '';
     photoPath = null;
     selfiePath = null;
+    livenessSessionId = null;
+    photoUploaded = false;
     notifyListeners();
   }
 

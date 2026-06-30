@@ -1,19 +1,17 @@
-import 'dart:io';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:video_player/video_player.dart';
 
+import '../../../../core/face/face_liveness_channel.dart';
+import '../../../../core/face/face_verification_service.dart';
 import '../../../../core/routes/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/signup_draft.dart';
 import '../widgets/metafter_primary_button.dart';
 import '../widgets/signup_scaffold.dart';
 
-/// Captures a short live video selfie that will be matched against the
-/// uploaded profile photo for identity verification.
+/// Runs a live face scan (Amazon Rekognition Face Liveness) via the native
+/// liveness UI, then hands off to the verifying screen which resolves whether
+/// the live face matches the uploaded profile photo.
 class SignupSelfieScreen extends StatefulWidget {
   const SignupSelfieScreen({super.key});
 
@@ -23,132 +21,75 @@ class SignupSelfieScreen extends StatefulWidget {
 
 class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
   final _draft = SignupDraft.instance;
-  final ImagePicker _picker = ImagePicker();
+  bool _running = false;
 
-  bool _capturing = false;
-  VideoPlayerController? _videoController;
-
-  @override
-  void dispose() {
-    _videoController?.dispose();
-    super.dispose();
-  }
-
-  Future<XFile?> _pickFromGallery() {
-    return _picker.pickVideo(
-      source: ImageSource.gallery,
-      maxDuration: const Duration(seconds: 5),
-    );
-  }
-
-  Future<void> _onCapture() async {
-    if (_capturing) return;
-    setState(() => _capturing = true);
+  Future<void> _startScan() async {
+    if (_running) return;
+    setState(() => _running = true);
     try {
-      XFile? file;
-      try {
-        file = await _picker.pickVideo(
-          source: ImageSource.camera,
-          preferredCameraDevice: CameraDevice.front,
-          maxDuration: const Duration(seconds: 5),
-        );
-      } on Exception {
-        // Camera not available (e.g. iOS simulator). Fall back to gallery
-        // in debug builds so the flow remains testable.
-        if (!kDebugMode) rethrow;
-        try {
-          file = await _pickFromGallery();
-        } on Exception {
-          file = null;
-        }
-      }
-
-      // Some platforms silently return null when the camera isn't
-      // available instead of throwing. Apply the same debug fallback.
-      if (file == null && kDebugMode) {
-        try {
-          file = await _pickFromGallery();
-        } on Exception {
-          file = null;
-        }
-      }
-
-      if (!mounted) return;
-      if (file == null) {
-        // Skip this step for now if we couldn't get any media.
-        setState(() => _capturing = false);
-        context.push(AppRouter.signupVerifying);
-        return;
-      }
-      _draft.update(() => _draft.selfiePath = file!.path);
-
-      final controller = VideoPlayerController.file(File(file.path));
-      await controller.initialize();
-      if (!mounted) {
-        await controller.dispose();
-        return;
-      }
-      await controller.setLooping(true);
-      await controller.setVolume(0);
-      await controller.play();
-      setState(() {
-        _videoController?.dispose();
-        _videoController = controller;
+      final sessionId = await FaceVerificationService.instance
+          .startLiveness(photoPath: _draft.photoPath);
+      _draft.update(() {
+        _draft.livenessSessionId = sessionId;
+        _draft.photoUploaded = true;
       });
-    } on Exception {
-      // Skip ahead on any unexpected error so the user isn't blocked.
       if (!mounted) return;
+      // Reset before navigating so the screen is interactive if the user pops
+      // back here to retry after a failed verification.
+      setState(() => _running = false);
       context.push(AppRouter.signupVerifying);
-    } finally {
-      if (mounted) setState(() => _capturing = false);
+    } on FaceLivenessException catch (e) {
+      if (!mounted) return;
+      setState(() => _running = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.isUnavailable
+                ? 'Face scan isn’t available here — you can skip and verify later.'
+                : 'Face scan didn’t complete: ${e.message}',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _running = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Couldn’t start the face scan. $e')),
+      );
     }
   }
 
-  void _onContinue() {
+  void _skip() {
+    _draft.update(() => _draft.livenessSessionId = null);
     context.push(AppRouter.signupVerifying);
   }
 
   @override
   Widget build(BuildContext context) {
-    final captured = _videoController?.value.isInitialized ?? false;
     return SignupScaffold(
       showBack: true,
-      title: 'Record a quick video selfie',
+      title: 'Verify it’s really you',
       subtitle: const Text(
-        'We’ll capture a 5-second video and match it with your profile '
-        'photo to confirm it’s really you.',
+        'We’ll run a quick face scan and match it with your profile photo to '
+        'confirm your identity.',
       ),
       bottomButton: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (captured)
-            MetafterPrimaryButton(
-              label: 'Continue',
-              onPressed: _onContinue,
-            )
-          else
-            MetafterPrimaryButton(
-              label: _capturing ? 'Opening camera…' : 'Capture Video Selfie',
-              onPressed: _capturing ? null : _onCapture,
+          MetafterPrimaryButton(
+            label: _running ? 'Starting…' : 'Start face scan',
+            onPressed: _running ? null : _startScan,
+          ),
+          TextButton(
+            onPressed: _running ? null : _skip,
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.textSecondary,
             ),
-          if (!captured)
-            TextButton(
-              onPressed: () {
-                // Always allow skipping, even while a picker is opening.
-                setState(() => _capturing = false);
-                _onContinue();
-              },
-              style: TextButton.styleFrom(
-                foregroundColor: AppColors.textSecondary,
-              ),
-              child: const Text(
-                'Skip for now',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+            child: const Text(
+              'Skip for now',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
             ),
+          ),
         ],
       ),
       child: Column(
@@ -163,41 +104,25 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
                   color: const Color(0xFFEFEFEF),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: captured
-                        ? AppColors.brandRed
-                        : Colors.black.withValues(alpha: 0.08),
+                    color: Colors.black.withValues(alpha: 0.08),
                     width: 2,
                   ),
                 ),
-                child: ClipOval(
-                  child: captured
-                      ? FittedBox(
-                          fit: BoxFit.cover,
-                          child: SizedBox(
-                            width: _videoController!.value.size.width,
-                            height: _videoController!.value.size.height,
-                            child: VideoPlayer(_videoController!),
-                          ),
-                        )
-                      : const Center(
-                          child: Icon(
-                            Icons.videocam_rounded,
-                            color: AppColors.textSecondary,
-                            size: 48,
-                          ),
-                        ),
+                child: const Center(
+                  child: Icon(
+                    Icons.face_retouching_natural_rounded,
+                    color: AppColors.textSecondary,
+                    size: 64,
+                  ),
                 ),
               ),
             ),
           ),
           const SizedBox(height: 24),
-          Text(
-            captured
-                ? 'Looks good — tap continue to verify.'
-                : 'Hold your face inside the circle and tap capture to '
-                    'record a 5-second video selfie.',
+          const Text(
+            'Hold your face inside the circle and follow the on-screen prompts.',
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
               color: AppColors.textSecondary,
               height: 1.4,

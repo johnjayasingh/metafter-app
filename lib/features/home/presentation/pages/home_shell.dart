@@ -390,9 +390,11 @@ class _HomeShellState extends State<HomeShell>
 
 // ─── Peek carousel ───────────────────────────────────────────────────────────
 
-/// A three-page carousel where **Home** is a full-screen hub. Swiping slides
-/// the Discover (left) / Messages (right) panels over it — each filling ~80%
-/// of the width — leaving ~20% of Home peeking on the far edge.
+/// A three-page carousel where **Home** is a full-screen hub. Each tab is
+/// full-screen when settled; swiping slides the Discover (left) / Messages
+/// (right) panel fully over Home as a shadowed card while Home recedes behind
+/// it (scale + parallax + dim), so the neighbour only *peeks* mid-drag and
+/// commits to a full view once released past threshold.
 class _PeekCarousel extends StatefulWidget {
   const _PeekCarousel({
     required this.position,
@@ -415,8 +417,8 @@ class _PeekCarousel extends StatefulWidget {
 }
 
 class _PeekCarouselState extends State<_PeekCarousel> {
-  /// Fraction of Home left peeking when a side panel is fully open.
-  static const double _peek = 0.2;
+  /// Inner-edge corner radius of a side panel while it is mid-slide.
+  static const double _cardRadius = 28;
 
   double _startPos = 1;
   double _startDx = 0;
@@ -426,7 +428,6 @@ class _PeekCarouselState extends State<_PeekCarousel> {
     return LayoutBuilder(
       builder: (context, c) {
         final w = c.maxWidth;
-        final panelW = w * (1 - _peek); // 80%
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onHorizontalDragStart: (d) {
@@ -449,37 +450,65 @@ class _PeekCarouselState extends State<_PeekCarousel> {
           child: ValueListenableBuilder<double>(
             valueListenable: widget.position,
             builder: (context, p, _) {
+              // 0 at Home, 1 when a side panel fully covers it.
+              final t = (p - 1).abs().clamp(0.0, 1.0);
+              // Home drifts away from the entering panel for parallax depth.
+              final dir = p < 1.0 ? -1.0 : 1.0;
               return Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  // Home hub — full-width base, recedes slightly off-centre.
+                  // Home hub — full-screen base that recedes as a card behind
+                  // the sliding panel (scale + parallax + dim).
                   Positioned.fill(
-                    child: Transform.scale(
-                      scale: 1.0 - 0.04 * (p - 1).abs().clamp(0.0, 1.0),
-                      child: ClipRRect(
-                        borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(28)),
-                        child: widget.home,
+                    child: Transform.translate(
+                      offset: Offset(dir * w * 0.06 * t, 0),
+                      child: Transform.scale(
+                        scale: 1.0 - 0.05 * t,
+                        child: ClipRRect(
+                          borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(28)),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              widget.home,
+                              if (t > 0)
+                                IgnorePointer(
+                                  child: ColoredBox(
+                                    color: Color.fromRGBO(0, 0, 0, 0.25 * t),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                  // Discover slides over from the left.
+                  // Discover slides fully over from the left; its inner (right)
+                  // edge rounds mid-slide and squares off once it fully covers.
                   if (p < 1.0)
                     Positioned(
                       top: 0,
                       bottom: 0,
-                      left: -panelW * p,
-                      width: panelW,
-                      child: _panel(widget.discover, roundRight: true),
+                      left: -w * p,
+                      width: w,
+                      child: _panel(
+                        widget.discover,
+                        roundRight: true,
+                        radius: _cardRadius * p,
+                      ),
                     ),
-                  // Messages slides over from the right.
+                  // Messages slides fully over from the right.
                   if (p > 1.0)
                     Positioned(
                       top: 0,
                       bottom: 0,
-                      left: w - panelW * (p - 1),
-                      width: panelW,
-                      child: _panel(widget.messages, roundRight: false),
+                      left: w * (2 - p),
+                      width: w,
+                      child: _panel(
+                        widget.messages,
+                        roundRight: false,
+                        radius: _cardRadius * (2 - p),
+                      ),
                     ),
                 ],
               );
@@ -490,14 +519,18 @@ class _PeekCarouselState extends State<_PeekCarousel> {
     );
   }
 
-  Widget _panel(Widget child, {required bool roundRight}) {
-    final radius = roundRight
-        ? const BorderRadius.horizontal(right: Radius.circular(28))
-        : const BorderRadius.horizontal(left: Radius.circular(28));
+  Widget _panel(
+    Widget child, {
+    required bool roundRight,
+    required double radius,
+  }) {
+    final br = roundRight
+        ? BorderRadius.horizontal(right: Radius.circular(radius))
+        : BorderRadius.horizontal(left: Radius.circular(radius));
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: radius,
+        borderRadius: br,
         boxShadow: const [
           BoxShadow(
             color: Color(0x33000000),
@@ -506,7 +539,7 @@ class _PeekCarouselState extends State<_PeekCarousel> {
           ),
         ],
       ),
-      child: ClipRRect(borderRadius: radius, child: child),
+      child: ClipRRect(borderRadius: br, child: child),
     );
   }
 }

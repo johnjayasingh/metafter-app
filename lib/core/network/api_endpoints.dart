@@ -12,4 +12,8 @@ class ApiEndpoints {
   // --- Profile ---
   static const String profile = '/profile';
   static const String photoUploadUrl = '/profile/photo-upload-url';
+
+  // --- Identity verification (Rekognition Face Liveness + CompareFaces) ---
+  static const String livenessSession = '/profile/liveness-session';
+  static const String verifyIdentity = '/profile/verify-identity';
 }

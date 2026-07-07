@@ -3,7 +3,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../../core/domain/models.dart';
+import '../../../../core/proximity/proximity_engine.dart';
+import '../../../../core/services/app_services.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/peer_avatar.dart';
 
 enum _DistanceUnit { feet, meters }
 
@@ -11,25 +15,16 @@ extension on _DistanceUnit {
   String get label => this == _DistanceUnit.feet ? 'ft' : 'mts';
 }
 
-/// Live "find a connection" proximity screen.
+/// Find Person — "Find Directions" (DESIGN_SPEC §8, A12).
 ///
-/// Reached after a connection request is accepted (e.g. tapping the
-/// `Find {Name}` button on the Connect screen, or `Connect` on the nearby
-/// profile card). Shows a directional arrow and a live-updating distance in
-/// the user's chosen unit.
+/// Live ranging comes from [ProximityEngine.range]: smoothed distance plus a
+/// coarse RSSI-gradient/compass bearing. The arrow eases toward the new
+/// bearing (~400 ms) and the distance text count-tweens; when the stream
+/// completes the peer was lost and a Retry re-subscribes.
 class FindPersonScreen extends StatefulWidget {
-  const FindPersonScreen({
-    super.key,
-    required this.name,
-    required this.title,
-    required this.company,
-    required this.photoUrl,
-  });
+  const FindPersonScreen({super.key, required this.card});
 
-  final String name;
-  final String title;
-  final String company;
-  final String? photoUrl;
+  final ProfileCard card;
 
   @override
   State<FindPersonScreen> createState() => _FindPersonScreenState();
@@ -37,68 +32,87 @@ class FindPersonScreen extends StatefulWidget {
 
 class _FindPersonScreenState extends State<FindPersonScreen>
     with SingleTickerProviderStateMixin {
-  Timer? _ticker;
-  // Live state — initial mock values.
-  double _meters = 6.1; // ≈ 20 ft
-  // Heading in radians, measured clockwise from "straight ahead" (up). 0 = up,
-  // π/2 = right, -π/2 = left, π = behind.
-  double _bearing = math.pi / 4; // 45° → "to your right"
+  StreamSubscription<RangeSample>? _sub;
+
+  double? _meters;
+
+  /// Accumulated bearing in radians (unwrapped so the eased rotation always
+  /// takes the short way instead of spinning through a full turn).
+  double _bearing = 0;
+  bool _lost = false;
   _DistanceUnit _unit = _DistanceUnit.feet;
 
-  late final AnimationController _arrowAnim;
+  late final AnimationController _pulse;
 
   @override
   void initState() {
     super.initState();
-    _arrowAnim = AnimationController(
+    _pulse = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
-    )..repeat(reverse: true);
-
-    // Simulate the user closing in on the target — distance drifts down with
-    // some noise; bearing wobbles a little.
-    final rng = math.Random();
-    _ticker = Timer.periodic(const Duration(milliseconds: 800), (_) {
-      if (!mounted) return;
-      setState(() {
-        _meters =
-            (_meters - 0.15 + rng.nextDouble() * 0.1).clamp(0.5, 50.0);
-        _bearing += (rng.nextDouble() - 0.5) * 0.2;
-      });
-    });
+    );
+    if (!AppServices.I.settings.reduceMotion.value) {
+      _pulse.repeat(reverse: true);
+    }
+    _subscribe();
   }
 
   @override
   void dispose() {
-    _ticker?.cancel();
-    _arrowAnim.dispose();
+    _sub?.cancel();
+    _pulse.dispose();
     super.dispose();
   }
 
-  String get _distanceValue {
-    if (_unit == _DistanceUnit.feet) {
-      return (_meters * 3.281).toStringAsFixed(0);
+  void _subscribe() {
+    _sub?.cancel();
+    setState(() => _lost = false);
+    _sub = AppServices.I.engine.range(widget.card.sub).listen(
+      (sample) {
+        if (!mounted) return;
+        setState(() {
+          _meters = sample.meters;
+          _bearing = _unwrap(from: _bearing, to: sample.bearing);
+        });
+      },
+      onError: (Object _) {
+        if (mounted) setState(() => _lost = true);
+      },
+      onDone: () {
+        if (mounted) setState(() => _lost = true);
+      },
+    );
+  }
+
+  /// Returns the angle equivalent to [to] that is closest to [from].
+  static double _unwrap({required double from, required double to}) {
+    var t = to;
+    while (t - from > math.pi) {
+      t -= 2 * math.pi;
     }
-    return _meters.toStringAsFixed(_meters < 10 ? 1 : 0);
+    while (t - from < -math.pi) {
+      t += 2 * math.pi;
+    }
+    return t;
+  }
+
+  String _distanceValue(double meters) {
+    if (_unit == _DistanceUnit.feet) {
+      return (meters * 3.281).toStringAsFixed(0);
+    }
+    return meters.toStringAsFixed(meters < 10 ? 1 : 0);
   }
 
   String get _directionWord {
-    // Bearing: -π..π, normalise to -π..π.
-    var b = _bearing;
-    while (b > math.pi) {
-      b -= 2 * math.pi;
-    }
-    while (b < -math.pi) {
-      b += 2 * math.pi;
-    }
+    // Normalise the accumulated bearing back to -π..π.
+    var b = _bearing % (2 * math.pi);
+    if (b > math.pi) b -= 2 * math.pi;
+    if (b <= -math.pi) b += 2 * math.pi;
     final deg = b * 180 / math.pi;
-    if (deg.abs() < 22) return 'ahead';
-    if (deg >= 22 && deg < 67) return 'to your right';
-    if (deg >= 67 && deg < 112) return 'to your right';
-    if (deg >= 112) return 'behind you';
-    if (deg <= -22 && deg > -67) return 'to your left';
-    if (deg <= -67 && deg > -112) return 'to your left';
-    return 'behind you';
+    if (deg.abs() < 22) return 'front';
+    if (deg >= 22 && deg < 112) return 'right';
+    if (deg <= -22 && deg > -112) return 'left';
+    return 'back';
   }
 
   @override
@@ -153,91 +167,43 @@ class _FindPersonScreenState extends State<FindPersonScreen>
                   ),
                 ),
 
-                // ── Avatar ──
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white,
-                  ),
-                  child: ClipOval(
-                    child: widget.photoUrl != null
-                        ? Image.network(
-                            widget.photoUrl!,
-                            width: 96,
-                            height: 96,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) =>
-                                _placeholder(96),
-                          )
-                        : _placeholder(96),
-                  ),
-                ),
+                // ── Person chip ──
                 const SizedBox(height: 12),
-                Text(widget.name,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    )),
-                const SizedBox(height: 4),
-                Text('${widget.title} - ${widget.company}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Colors.white,
-                    )),
-
-                // ── Arrow + distance ──
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 32),
+                  padding: const EdgeInsets.fromLTRB(10, 8, 18, 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(32),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      AnimatedBuilder(
-                        animation: _arrowAnim,
-                        builder: (context, _) {
-                          // Slight "breathing" pulse.
-                          final scale = 1.0 + 0.05 * _arrowAnim.value;
-                          return Transform.scale(
-                            scale: scale,
-                            child: Transform.rotate(
-                              angle: _bearing,
-                              child: SizedBox(
-                                width: 200,
-                                height: 200,
-                                child: CustomPaint(
-                                  painter: _ArrowPainter(),
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 28),
-                      RichText(
-                        textAlign: TextAlign.center,
-                        text: TextSpan(
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF1F1F1F),
-                          ),
+                      PeerAvatar(
+                          card: widget.card, size: 44, showVerified: true),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            TextSpan(
-                              text: '$_distanceValue ${_unit.label} ',
+                            Text(
+                              widget.card.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                color: AppColors.brandRed,
-                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
                               ),
                             ),
-                            const TextSpan(text: 'to your '),
-                            TextSpan(
-                              text: _directionWord
-                                  .replaceAll('to your ', '')
-                                  .replaceAll('ahead', 'front'),
-                              style: const TextStyle(
-                                color: AppColors.brandRed,
-                                fontWeight: FontWeight.w800,
+                            Text(
+                              widget.card.titleLine,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.white.withValues(alpha: 0.85),
                               ),
                             ),
                           ],
@@ -245,6 +211,11 @@ class _FindPersonScreenState extends State<FindPersonScreen>
                       ),
                     ],
                   ),
+                ),
+
+                // ── Arrow + distance / lost state ──
+                Expanded(
+                  child: _lost ? _buildLost() : _buildRanging(),
                 ),
 
                 // ── Done ──
@@ -278,12 +249,120 @@ class _FindPersonScreenState extends State<FindPersonScreen>
     );
   }
 
-  Widget _placeholder(double size) => Container(
-        width: size,
-        height: size,
-        color: const Color(0xFFE3C8B5),
-        child: const Icon(Icons.person, color: Colors.white, size: 48),
-      );
+  Widget _buildRanging() {
+    final meters = _meters;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        AnimatedBuilder(
+          animation: _pulse,
+          builder: (context, child) {
+            // Slight "breathing" pulse (disabled under reduce-motion —
+            // the controller simply never runs).
+            final scale = 1.0 + 0.05 * _pulse.value;
+            return Transform.scale(scale: scale, child: child);
+          },
+          child: AnimatedRotation(
+            turns: _bearing / (2 * math.pi),
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeInOut,
+            child: SizedBox(
+              width: 200,
+              height: 200,
+              child: CustomPaint(painter: _ArrowPainter()),
+            ),
+          ),
+        ),
+        const SizedBox(height: 28),
+        if (meters == null)
+          const Text(
+            'Locating…',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF6B6B6B),
+            ),
+          )
+        else
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0, end: meters),
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeOut,
+            builder: (context, value, _) => Text.rich(
+              textAlign: TextAlign.center,
+              TextSpan(
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1F1F1F),
+                ),
+                children: [
+                  TextSpan(
+                    text: '${_distanceValue(value)} ${_unit.label} ',
+                    style: const TextStyle(
+                      color: AppColors.brandRed,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const TextSpan(text: 'to your '),
+                  TextSpan(
+                    text: _directionWord,
+                    style: const TextStyle(
+                      color: AppColors.brandRed,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildLost() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.wifi_tethering_off_rounded,
+            size: 64, color: AppColors.brandRed.withValues(alpha: 0.5)),
+        const SizedBox(height: 18),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 40),
+          child: Text(
+            'Signal lost — they may have moved away',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF1F1F1F),
+              height: 1.4,
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            side: const BorderSide(color: AppColors.brandRed),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          onPressed: _subscribe,
+          child: const Text(
+            'Retry',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: AppColors.brandRed,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   Future<void> _pickUnit() async {
     final picked = await showModalBottomSheet<_DistanceUnit>(
@@ -321,8 +400,8 @@ class _FindPersonScreenState extends State<FindPersonScreen>
             ),
             for (final u in _DistanceUnit.values)
               ListTile(
-                title: Text(u == _DistanceUnit.feet ? 'Feet (ft)'
-                    : 'Meters (mts)'),
+                title: Text(
+                    u == _DistanceUnit.feet ? 'Feet (ft)' : 'Meters (mts)'),
                 trailing: u == _unit
                     ? const Icon(Icons.check_rounded,
                         color: AppColors.brandRed)
@@ -334,7 +413,7 @@ class _FindPersonScreenState extends State<FindPersonScreen>
         ),
       ),
     );
-    if (picked != null) setState(() => _unit = picked);
+    if (picked != null && mounted) setState(() => _unit = picked);
   }
 }
 

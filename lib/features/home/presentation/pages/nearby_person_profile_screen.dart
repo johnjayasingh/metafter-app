@@ -1,211 +1,201 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/domain/models.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/peer_avatar.dart';
+import '../widgets/invite_note_dialog.dart';
 
-/// Profile data for a nearby discovered person.
-class NearbyPersonProfile {
-  const NearbyPersonProfile({
-    required this.name,
-    required this.title,
-    required this.company,
-    required this.bio,
-    this.photoUrl,
-    this.initials = '',
-    this.avatarBg = const Color(0xFFB7D9F2),
-  });
-
-  final String name;
-  final String title;
-  final String company;
-  final String bio;
-  final String? photoUrl;
-  final String initials;
-  final Color avatarBg;
-}
-
-/// Full-screen profile card shown when a nearby person avatar is tapped.
-class NearbyPersonProfileScreen extends StatelessWidget {
+/// Nearby Person Profile — "Bubble Tap" (DESIGN_SPEC §5).
+///
+/// Full-screen brand-red gradient page shown when a peer bubble (Meet) or a
+/// Discover row is tapped. Data comes from the peer's [ProfileCard] snapshot
+/// already cached at sighting time; Connect runs the invite-note +
+/// send-request flow and flips to a disabled "Request Sent".
+class NearbyPersonProfileScreen extends StatefulWidget {
   const NearbyPersonProfileScreen({
     super.key,
-    required this.profile,
+    required this.card,
+    this.encounterId,
+    this.meters,
   });
 
-  final NearbyPersonProfile profile;
+  final ProfileCard card;
+
+  /// Discover-ledger row to link the outgoing request back to.
+  final String? encounterId;
+
+  /// Last estimated distance — shows the "x.x mtr away" chip when known.
+  final double? meters;
+
+  @override
+  State<NearbyPersonProfileScreen> createState() =>
+      _NearbyPersonProfileScreenState();
+}
+
+class _NearbyPersonProfileScreenState extends State<NearbyPersonProfileScreen> {
+  bool _sent = false;
+  bool _sending = false;
+
+  Future<void> _connect() async {
+    if (_sent || _sending) return;
+    setState(() => _sending = true);
+    final sent = await sendConnectRequestFlow(
+      context,
+      toCard: widget.card,
+      encounterId: widget.encounterId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _sending = false;
+      _sent = sent;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    const accent = AppColors.discoverActive;
+    final card = widget.card;
+    final meters = widget.meters;
 
     return Scaffold(
-      body: Stack(
-        children: [
-          // ---- Gradient background ----
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: [0.0, 0.45, 1.0],
-                colors: [
-                  accent,
-                  Color(0xFF7DC8FD),
-                  Colors.white,
-                ],
-              ),
-            ),
-          ),
-
-          // ---- Content ----
-          SafeArea(
-            child: Column(
-              children: [
-                // ---- App bar ----
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                      const Expanded(
-                        child: Center(
-                          child: Text(
-                            'MetAfter',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                              letterSpacing: -0.4,
-                            ),
+      body: Container(
+        decoration: const BoxDecoration(gradient: AppColors.brandSunset),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // ── App bar: back arrow + wordmark ──
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                          color: Colors.white),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                    const Expanded(
+                      child: Center(
+                        child: Text(
+                          'MetAfter',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: -0.4,
                           ),
                         ),
                       ),
-                      // Placeholder to balance the back button
-                      const SizedBox(width: 48),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 48),
+                  ],
                 ),
+              ),
 
-                const SizedBox(height: 32),
+              const SizedBox(height: 32),
 
-                // ---- Avatar ----
-                Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: accent, width: 3),
-                    color: profile.avatarBg,
-                  ),
-                  child: ClipOval(
-                    child: profile.photoUrl != null
-                        ? Image.network(
-                            profile.photoUrl!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) =>
-                                _InitialsAvatar(initials: profile.initials),
-                          )
-                        : _InitialsAvatar(initials: profile.initials),
-                  ),
-                ),
+              PeerAvatar(
+                card: card,
+                size: 120,
+                showVerified: true,
+                ringColor: Colors.white,
+                ringWidth: 3,
+              ),
 
-                const SizedBox(height: 20),
+              const SizedBox(height: 20),
 
-                // ---- Name + title ----
-                Text(
-                  profile.name,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  card.name,
+                  textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 22,
+                    fontSize: 24,
                     fontWeight: FontWeight.w800,
-                    color: Colors.black,
+                    color: Colors.white,
                     letterSpacing: -0.3,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '${profile.title} \u2013 ${profile.company}',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Color(0xFF6B6B6B),
+              ),
+              const SizedBox(height: 6),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  card.titleLine,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: Colors.white.withValues(alpha: 0.85),
                   ),
                 ),
+              ),
 
-                const SizedBox(height: 28),
-
-                // ---- Bio ----
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
+              if (meters != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                   child: Text(
-                    profile.bio,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      color: Color(0xFF333333),
-                      height: 1.5,
-                    ),
-                  ),
-                ),
-
-                const Spacer(),
-
-                // ---- Connect button ----
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
-                  child: SizedBox(
-                    width: double.infinity,
-                    height: 54,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: accent,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                                'Connect request sent to ${profile.name}'),
-                            duration: const Duration(seconds: 2),
-                          ),
-                        );
-                      },
-                      child: const Text(
-                        'Connect',
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
+                    '${meters.toStringAsFixed(1)} mtr away',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white.withValues(alpha: 0.9),
                     ),
                   ),
                 ),
               ],
-            ),
+
+              const SizedBox(height: 28),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Text(
+                  card.intro,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: Colors.white.withValues(alpha: 0.85),
+                    height: 1.5,
+                  ),
+                ),
+              ),
+
+              const Spacer(),
+
+              // ── Connect / Request Sent ──
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFF03D33),
+                      disabledBackgroundColor:
+                          Colors.white.withValues(alpha: 0.16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: _sent || _sending ? null : _connect,
+                    child: Text(
+                      _sent ? 'Request Sent' : 'Connect',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                        color: _sent
+                            ? Colors.white.withValues(alpha: 0.7)
+                            : Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InitialsAvatar extends StatelessWidget {
-  const _InitialsAvatar({required this.initials});
-  final String initials;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        initials,
-        style: const TextStyle(
-          fontSize: 36,
-          fontWeight: FontWeight.w700,
-          color: Colors.white,
         ),
       ),
     );

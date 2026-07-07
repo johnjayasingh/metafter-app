@@ -2,23 +2,30 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../../core/domain/models.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/peer_avatar.dart';
 
-/// Voice or video call screen.
+/// Voice or video call screen — a simulated preview this phase
+/// (DESIGN_SPEC §10: real WebRTC signalling is a later milestone).
 ///
 /// Driven by [isVideo] — switches between a full-bleed remote video preview
 /// (with self-PIP) and a centered avatar voice-only layout. Both share the
-/// same control bar (mute, speaker, camera toggle, end call).
+/// same control bar (mute, speaker, camera toggle, end call). When [card] is
+/// provided the peer is rendered with [PeerAvatar] (base64 photo / initials);
+/// [photoUrl] remains as a legacy fallback.
 class CallScreen extends StatefulWidget {
   const CallScreen({
     super.key,
     required this.name,
-    required this.photoUrl,
+    this.photoUrl,
+    this.card,
     required this.isVideo,
   });
 
   final String name;
-  final String photoUrl;
+  final String? photoUrl;
+  final ProfileCard? card;
   final bool isVideo;
 
   @override
@@ -70,7 +77,7 @@ class _CallScreenState extends State<CallScreen> {
             // soft gradient.
             Positioned.fill(
               child: widget.isVideo
-                  ? _VideoStage(photoUrl: widget.photoUrl)
+                  ? _VideoStage(photoUrl: widget.photoUrl, card: widget.card)
                   : Container(
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
@@ -137,19 +144,29 @@ class _CallScreenState extends State<CallScreen> {
                             color: Colors.white.withValues(alpha: 0.4),
                             width: 2),
                       ),
-                      child: ClipOval(
-                        child: Image.network(
-                          widget.photoUrl,
-                          width: 130,
-                          height: 130,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            width: 130,
-                            height: 130,
-                            color: Colors.white24,
-                          ),
-                        ),
-                      ),
+                      child: widget.card != null
+                          ? PeerAvatar(card: widget.card!, size: 130)
+                          : ClipOval(
+                              child: widget.photoUrl != null
+                                  ? Image.network(
+                                      widget.photoUrl!,
+                                      width: 130,
+                                      height: 130,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, _, _) => Container(
+                                        width: 130,
+                                        height: 130,
+                                        color: Colors.white24,
+                                      ),
+                                    )
+                                  : Container(
+                                      width: 130,
+                                      height: 130,
+                                      color: Colors.white24,
+                                      child: const Icon(Icons.person,
+                                          color: Colors.white38, size: 56),
+                                    ),
+                            ),
                     ),
                     const SizedBox(height: 18),
                     Text(widget.name,
@@ -160,7 +177,9 @@ class _CallScreenState extends State<CallScreen> {
                         )),
                     const SizedBox(height: 6),
                     Text(
-                      _connecting ? 'Connecting…' : _fmt(_elapsed),
+                      _connecting
+                          ? 'Calling… (preview — calls ship in a later release)'
+                          : _fmt(_elapsed),
                       style: const TextStyle(
                         fontSize: 14,
                         color: Colors.white70,
@@ -189,7 +208,9 @@ class _CallScreenState extends State<CallScreen> {
                         )),
                     const SizedBox(height: 4),
                     Text(
-                      _connecting ? 'Connecting…' : _fmt(_elapsed),
+                      _connecting
+                          ? 'Calling… (preview — calls ship in a later release)'
+                          : _fmt(_elapsed),
                       style: const TextStyle(
                         fontSize: 13,
                         color: Colors.white,
@@ -248,6 +269,7 @@ class _CallScreenState extends State<CallScreen> {
                                 builder: (_) => CallScreen(
                                   name: widget.name,
                                   photoUrl: widget.photoUrl,
+                                  card: widget.card,
                                   isVideo: true,
                                 ),
                               ),
@@ -281,18 +303,28 @@ class _CallScreenState extends State<CallScreen> {
 }
 
 class _VideoStage extends StatelessWidget {
-  const _VideoStage({required this.photoUrl});
-  final String photoUrl;
+  const _VideoStage({required this.photoUrl, required this.card});
+  final String? photoUrl;
+  final ProfileCard? card;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Faux remote feed: blurred portrait
-        Image.network(photoUrl,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(color: Colors.black87)),
+        // Faux remote feed: the peer's avatar on a dark stage (no real
+        // video this phase).
+        if (card != null)
+          ColoredBox(
+            color: const Color(0xFF141414),
+            child: Center(child: PeerAvatar(card: card!, size: 180)),
+          )
+        else if (photoUrl != null)
+          Image.network(photoUrl!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => Container(color: Colors.black87))
+        else
+          Container(color: Colors.black87),
         Container(color: Colors.black.withValues(alpha: 0.25)),
         // Self preview PIP
         Positioned(

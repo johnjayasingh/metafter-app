@@ -41,9 +41,9 @@ class SignupDraft extends ChangeNotifier {
   /// attempt. In-memory only (transient to the signup flow).
   String? livenessSessionId;
 
-  /// `true` once the profile photo has been uploaded to S3 this session, so we
-  /// don't re-upload it. In-memory only.
-  bool photoUploaded = false;
+  /// S3 key the reference photo was uploaded to for the current verification
+  /// attempt (echoed back to `verification/complete`). In-memory only.
+  String? verificationPhotoKey;
 
   /// `true` once the user has completed the signup flow at least once.
   bool isOnboarded = false;
@@ -119,7 +119,7 @@ class SignupDraft extends ChangeNotifier {
     photoPath = null;
     selfiePath = null;
     livenessSessionId = null;
-    photoUploaded = false;
+    verificationPhotoKey = null;
     notifyListeners();
   }
 

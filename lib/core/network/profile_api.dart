@@ -5,37 +5,43 @@ import 'package:dio/dio.dart';
 import 'api_client.dart';
 import 'api_endpoints.dart';
 
-/// Talks to the backend `/v1/profile` endpoints.
-class ProfileApi {
+/// Talks to the backend `/v1/verification/*` endpoints.
+///
+/// The backend is stateless with respect to user data: the reference photo is
+/// uploaded to a presigned, TTL'd S3 key and deleted the moment the face
+/// comparison finishes. The only durable outcome is `{verified, badgeSig}`
+/// on the caller's directory row.
+class VerificationApi {
   final ApiClient _api = ApiClient();
 
-  /// PUT /v1/profile — upserts the signed-in user's profile. The backend
-  /// derives userId from the Cognito ID token, so we only send public fields.
-  Future<void> putProfile({
-    required String displayName,
-    String? headline,
-    String? company,
-    String? bio,
-  }) async {
-    await _api.put(ApiEndpoints.profile, data: {
-      'displayName': displayName,
-      if (headline != null && headline.isNotEmpty) 'headline': headline,
-      if (company != null && company.isNotEmpty) 'company': company,
-      if (bio != null && bio.isNotEmpty) 'bio': bio,
-    });
+  /// POST /v1/verification/start — opens a Rekognition Face Liveness session
+  /// and presigns a PUT for the reference photo.
+  Future<VerificationSession> start() async {
+    final res = await _api.post(ApiEndpoints.verificationStart, data: const {});
+    final d = (res.data as Map).cast<String, dynamic>();
+    final sessionId = d['sessionId'] as String?;
+    final photoUploadUrl = d['photoUploadUrl'] as String?;
+    final photoKey = d['photoKey'] as String?;
+    if (sessionId == null || sessionId.isEmpty) {
+      throw StateError('verification/start returned no sessionId');
+    }
+    if (photoUploadUrl == null || photoKey == null) {
+      throw StateError('verification/start returned no photo upload target');
+    }
+    return VerificationSession(
+      sessionId: sessionId,
+      photoUploadUrl: photoUploadUrl,
+      photoKey: photoKey,
+    );
   }
 
-  /// Requests a presigned S3 PUT URL and uploads the avatar bytes directly.
-  /// The upload itself must NOT carry our Authorization header (it would
+  /// Uploads the reference photo bytes to the presigned S3 PUT URL from
+  /// [start]. The upload must NOT carry our Authorization header (it would
   /// break the S3 signature), so it uses a bare Dio instance.
-  Future<void> uploadPhoto(File file) async {
-    final res = await _api.post(ApiEndpoints.photoUploadUrl);
-    final uploadUrl = res.data['uploadUrl'] as String?;
-    if (uploadUrl == null) return;
-
+  Future<void> uploadPhoto(File file, String presignedUrl) async {
     final bytes = await file.readAsBytes();
     await Dio().put(
-      uploadUrl,
+      presignedUrl,
       data: Stream.fromIterable([bytes]),
       options: Options(
         headers: {
@@ -47,28 +53,22 @@ class ProfileApi {
     );
   }
 
-  /// POST /v1/profile/liveness-session — opens a Rekognition Face Liveness
-  /// session and returns its id for the native liveness UI to stream into.
-  Future<String> createLivenessSession() async {
-    final res = await _api.post(ApiEndpoints.livenessSession);
-    final id = res.data['sessionId'] as String?;
-    if (id == null || id.isEmpty) {
-      throw StateError('liveness-session returned no sessionId');
-    }
-    return id;
-  }
-
-  /// POST /v1/profile/verify-identity — server resolves the liveness result and
-  /// matches the captured frame against the stored profile photo.
-  Future<IdentityVerificationResult> verifyIdentity(String sessionId) async {
+  /// POST /v1/verification/complete — server resolves the liveness session,
+  /// compares the captured frame with the uploaded photo, and (on success)
+  /// signs the verified badge.
+  Future<IdentityVerificationResult> complete(
+    String sessionId,
+    String photoKey,
+  ) async {
     final res = await _api.post(
-      ApiEndpoints.verifyIdentity,
-      data: {'sessionId': sessionId},
+      ApiEndpoints.verificationComplete,
+      data: {'sessionId': sessionId, 'photoKey': photoKey},
     );
     final d = (res.data as Map).cast<String, dynamic>();
     return IdentityVerificationResult(
       verified: d['verified'] as bool? ?? false,
       status: d['status'] as String? ?? 'failed',
+      badgeSig: d['badgeSig'] as String?,
       reason: d['reason'] as String?,
       livenessConfidence: (d['livenessConfidence'] as num?)?.toDouble(),
       faceSimilarity: (d['faceSimilarity'] as num?)?.toDouble(),
@@ -76,11 +76,30 @@ class ProfileApi {
   }
 }
 
+/// One verification attempt opened by [VerificationApi.start].
+class VerificationSession {
+  const VerificationSession({
+    required this.sessionId,
+    required this.photoUploadUrl,
+    required this.photoKey,
+  });
+
+  /// Rekognition Face Liveness session id for the native liveness UI.
+  final String sessionId;
+
+  /// Presigned S3 PUT URL for the reference photo (short TTL).
+  final String photoUploadUrl;
+
+  /// S3 key the photo lands under — echoed back to `complete`.
+  final String photoKey;
+}
+
 /// Outcome of the backend identity-verification call.
 class IdentityVerificationResult {
   const IdentityVerificationResult({
     required this.verified,
     required this.status,
+    this.badgeSig,
     this.reason,
     this.livenessConfidence,
     this.faceSimilarity,
@@ -89,8 +108,11 @@ class IdentityVerificationResult {
   /// `true` only when the subject was live AND matched the profile photo.
   final bool verified;
 
-  /// `'verified' | 'failed' | 'pending'`.
+  /// `'verified' | 'failed'`.
   final String status;
+
+  /// Server-issued badge signature, present only when [verified].
+  final String? badgeSig;
 
   /// `'liveness_failed' | 'face_mismatch'` when not verified.
   final String? reason;

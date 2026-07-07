@@ -4,17 +4,22 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:lottie/lottie.dart';
-import 'package:permission_handler/permission_handler.dart';
 
-import '../../../../core/config/environment_config.dart';
+import '../../../../core/domain/models.dart';
+import '../../../../core/proximity/proximity_engine.dart';
+import '../../../../core/services/app_services.dart';
+import '../../../../core/services/services.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/time_format.dart';
 import '../../../../core/widgets/metafter_logo.dart';
+import '../../../../core/widgets/peer_avatar.dart';
 import '../../../signup/data/signup_draft.dart';
 import 'all_messages_screen.dart';
-import 'connected_profile_screen.dart';
+import 'connect_requests_screen.dart';
 import 'discover_history_screen.dart';
+import 'find_person_screen.dart';
+import 'nearby_person_profile_screen.dart';
 import 'profile_settings_screen.dart';
 
 /// Swipeable host for the three primary tabs — Discover · Home/Meet · Messages —
@@ -22,7 +27,9 @@ import 'profile_settings_screen.dart';
 ///
 /// The middle tab is the discovery control panel. Idle it reads **Home**
 /// (dark→red); once a session starts it becomes an immersive **Meet** radar
-/// (dark→green) showing the people nearby.
+/// (dark→green) showing the people nearby. All state comes from
+/// [AppServices.I] — the session service drives the countdown/radar and the
+/// request repository drives the pull-up sheet.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -34,52 +41,15 @@ class _HomeShellState extends State<HomeShell>
     with SingleTickerProviderStateMixin {
   static const _homeIndex = 1;
 
-  static const _sessionDurations = <String, Duration>{
-    '1 hr': Duration(hours: 1),
-    '2 hrs': Duration(hours: 2),
-    '4 hrs': Duration(hours: 4),
-    '8 hrs': Duration(hours: 8),
-  };
-  static const _distances = <String, double>{
-    '1 mt': 1,
-    '2 mts': 2,
-    '5 mts': 5,
-    '10 mts': 10,
-  };
-
-  // Mock nearby people shown on the radar in dev/local builds.
-  static const _mockNearby = <_NearbyPerson>[
-    _NearbyPerson(id: 'n1', meters: 1.0, photoUrl: 'https://i.pravatar.cc/150?img=14', name: 'Owen Hill'),
-    _NearbyPerson(id: 'n2', meters: 2.0, photoUrl: 'https://i.pravatar.cc/150?img=44', name: 'Jasmine Lee'),
-    _NearbyPerson(id: 'n3', meters: 0.7, photoUrl: 'https://i.pravatar.cc/150?img=13', name: 'Marcus Reid'),
-    _NearbyPerson(id: 'n4', meters: 0.5, photoUrl: 'https://i.pravatar.cc/150?img=49', name: 'Kira Patel'),
-  ];
-
   /// Continuous carousel position — 0 = Discover, 1 = Home, 2 = Messages.
   final ValueNotifier<double> _pagePos =
       ValueNotifier<double>(_homeIndex.toDouble());
   late final AnimationController _pageAnim;
   int _page = _homeIndex;
 
-  bool _discoverable = false;
-  bool _incognito = false;
-  bool _starting = false;
-  String _durationLabel = '4 hrs';
-  String _distanceLabel = '2 mts';
-
-  Timer? _ticker;
-  Duration _remaining = Duration.zero;
-
-  StreamSubscription<List<ScanResult>>? _scanSub;
-  final Map<String, _NearbyPerson> _nearby = <String, _NearbyPerson>{};
-  final _rng = math.Random(7);
-
-  final List<_ConnReq> _requests = List.of(_seedRequests);
-
-  bool get _isMockMode =>
-      EnvironmentConfig.isDev || EnvironmentConfig.isLocal;
-
-  bool get _immersive => _page == _homeIndex && _discoverable;
+  /// Single-listener repo stream — created once for the shell's lifetime and
+  /// consumed by exactly one StreamBuilder (in _DiscoverCard's stable root).
+  late final Stream<int> _pendingCount;
 
   @override
   void initState() {
@@ -88,15 +58,11 @@ class _HomeShellState extends State<HomeShell>
       vsync: this,
       duration: const Duration(milliseconds: 320),
     );
+    _pendingCount = AppServices.I.requests.watchIncomingPendingCount();
   }
 
   @override
   void dispose() {
-    _ticker?.cancel();
-    _scanSub?.cancel();
-    if (_discoverable && !_isMockMode) {
-      FlutterBluePlus.stopScan();
-    }
     _pageAnim.dispose();
     _pagePos.dispose();
     super.dispose();
@@ -119,8 +85,9 @@ class _HomeShellState extends State<HomeShell>
     });
   }
 
-  void _setIncognito(bool v) {
-    setState(() => _incognito = v);
+  Future<void> _setIncognito(bool v) async {
+    await AppServices.I.settings.setIncognitoScan(v);
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 2),
@@ -133,23 +100,80 @@ class _HomeShellState extends State<HomeShell>
     );
   }
 
-  void _accept(_ConnReq r) {
-    setState(() => _requests.remove(r));
+  // ── Discovery session ──
+
+  Future<void> _startSession() async {
+    final error = await AppServices.I.session.start();
+    if (!mounted || error == null) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        duration: const Duration(seconds: 2),
         backgroundColor: AppColors.brandRed,
-        content: Text('Connected with ${r.name}!'),
+        content: Text(error),
       ),
     );
   }
 
-  void _decline(_ConnReq r) => setState(() => _requests.remove(r));
+  Future<void> _endSession() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('End session?'),
+        content:
+            const Text('You will stop being discoverable to people nearby.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.brandRed),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('End'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await AppServices.I.session.end();
+  }
 
-  /// Opens the connection-request sheet as a modal. Only reachable when there
-  /// are pending requests (the pull-up indicator drives it).
+  // ── Requests (pull-up sheet) ──
+
+  Future<void> _acceptRequest(ConnectionRequest request) async {
+    final services = AppServices.I;
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    await services.connection.accept(request);
+    final stillNearby = services.engine.isNearby(request.peerSub);
+    messenger.showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 4),
+        backgroundColor: AppColors.brandRed,
+        content: Text('Connected with ${request.card.name}!'),
+        action: stillNearby
+            ? SnackBarAction(
+                label: 'Find them',
+                textColor: Colors.white,
+                onPressed: () => navigator.push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => FindPersonScreen(card: request.card),
+                  ),
+                ),
+              )
+            : null,
+      ),
+    );
+  }
+
+  Future<void> _declineRequest(ConnectionRequest request) =>
+      AppServices.I.connection.decline(request);
+
+  void _openFullRequests() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ConnectRequestsScreen()),
+    );
+  }
+
   void _openConnectSheet(BuildContext context) {
-    if (_requests.isEmpty) return;
     showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
@@ -157,233 +181,83 @@ class _HomeShellState extends State<HomeShell>
       backgroundColor: Colors.transparent,
       barrierColor: const Color(0x40000000),
       builder: (_) => _ConnectSheetModal(
-        requests: _requests,
-        onAccept: _accept,
-        onDecline: _decline,
+        onAccept: _acceptRequest,
+        onDecline: _declineRequest,
+        onExpand: _openFullRequests,
       ),
     );
   }
 
-  void _openProfile(_NearbyPerson p) {
+  void _openProfile(NearbyPeer peer) {
+    final card = peer.card;
+    if (card == null) return; // card not read yet — nothing to show
     Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => ConnectedProfileScreen(
-        name: p.name,
-        title: '',
-        company: '',
-        bio: '',
-        photoUrl: p.photoUrl,
-      ),
+      builder: (_) => NearbyPersonProfileScreen(card: card, meters: peer.meters),
     ));
   }
 
-  // ── Discovery session ──
-  Future<void> _startSession() async {
-    if (_starting || _discoverable) return;
-    setState(() => _starting = true);
-
-    if (!_isMockMode) {
-      final ok = await _ensureBluetoothReady();
-      if (!mounted) return;
-      if (!ok) {
-        setState(() => _starting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Bluetooth permission denied. Please enable Bluetooth to '
-              'discover people nearby.',
-            ),
-          ),
-        );
-        return;
-      }
-    }
-
-    final total = _sessionDurations[_durationLabel] ?? const Duration(hours: 4);
-    setState(() {
-      _discoverable = true;
-      _starting = false;
-      _remaining = total;
-      _nearby.clear();
-      if (_isMockMode) {
-        for (final p in _mockNearby) {
-          _nearby[p.id] = p;
-        }
-      }
-    });
-
-    _ticker?.cancel();
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      if (_remaining.inSeconds <= 1) {
-        _endSession();
-      } else {
-        setState(() => _remaining -= const Duration(seconds: 1));
-      }
-    });
-
-    if (_isMockMode) return;
-
-    _scanSub?.cancel();
-    _scanSub = FlutterBluePlus.scanResults.listen((results) {
-      if (!mounted) return;
-      final maxMeters = _distances[_distanceLabel] ?? 2.0;
-      var changed = false;
-      for (final r in results) {
-        final id = r.device.remoteId.str;
-        final meters = _rssiToMeters(r.rssi);
-        if (meters > maxMeters * 4) continue;
-        if (!_nearby.containsKey(id)) {
-          if (_nearby.length >= 6) continue;
-          _nearby[id] = _NearbyPerson(
-            id: id,
-            meters: meters,
-            photoUrl: 'https://i.pravatar.cc/150?img=${12 + _rng.nextInt(40)}',
-            name: 'Nearby',
-          );
-          changed = true;
-        }
-      }
-      if (changed) setState(() {});
-    });
-
-    try {
-      await FlutterBluePlus.startScan(
-        timeout: total,
-        androidScanMode: AndroidScanMode.lowLatency,
-      );
-    } on Exception catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Scan failed: $e')),
-      );
-      _endSession();
-    }
-  }
-
-  Future<void> _endSession() async {
-    _ticker?.cancel();
-    _scanSub?.cancel();
-    _scanSub = null;
-    if (!_isMockMode) {
-      try {
-        await FlutterBluePlus.stopScan();
-      } on Exception {
-        // ignore
-      }
-    }
-    if (!mounted) return;
-    setState(() {
-      _discoverable = false;
-      _remaining = Duration.zero;
-      _nearby.clear();
-    });
-  }
-
-  Future<bool> _ensureBluetoothReady() async {
-    try {
-      if (!await FlutterBluePlus.isSupported) return false;
-    } on Exception {
-      // isSupported can throw on the iOS Simulator — continue.
-    }
-
-    if (Platform.isAndroid) {
-      final statuses = await [
-        Permission.bluetoothScan,
-        Permission.bluetoothConnect,
-        Permission.locationWhenInUse,
-      ].request();
-      final granted = statuses.values.every((s) => s.isGranted || s.isLimited);
-      if (!granted) return false;
-
-      try {
-        await FlutterBluePlus.turnOn();
-      } on Exception {
-        // user may decline; scan will surface that.
-      }
-
-      final state = await FlutterBluePlus.adapterState
-          .where((s) => s == BluetoothAdapterState.on)
-          .first
-          .timeout(const Duration(seconds: 4),
-              onTimeout: () => BluetoothAdapterState.unknown);
-      return state == BluetoothAdapterState.on;
-    }
-
-    return true;
-  }
-
-  double _rssiToMeters(int rssi) {
-    const measuredPower = -69;
-    final ratio = (measuredPower - rssi) / (10 * 2.0);
-    return math.pow(10, ratio).toDouble().clamp(0.1, 50);
+  void _openSettings() {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => const ProfileSettingsScreen(),
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
     final photo = SignupDraft.instance.photoPath;
     final hasPhoto = (photo ?? '').isNotEmpty;
-    final immersive = _immersive;
 
-    return Scaffold(
-      backgroundColor: immersive ? Colors.black : Colors.white,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            _SharedHeader(
-              page: _page,
-              immersive: immersive,
-              incognito: _incognito,
-              onIncognito: _setIncognito,
-              onPrev: () => _goToPage(_page - 1),
-              onNext: () => _goToPage(_page + 1),
-            ),
-            _PageTitleStrip(
-              position: _pagePos,
-              titles: ['Discover', _discoverable ? 'Meet' : 'Home', 'Messages'],
-              immersive: immersive,
-            ),
-            Expanded(
-              child: _PeekCarousel(
-                position: _pagePos,
-                onDragStart: () => _pageAnim.stop(),
-                onSnap: _goToPage,
-                home: _DiscoverCard(
-                  photoPath: hasPhoto ? photo : null,
-                  discoverable: _discoverable,
-                  incognito: _incognito,
-                  starting: _starting,
-                  remaining: _remaining,
-                  durationLabel: _durationLabel,
-                  distanceLabel: _distanceLabel,
-                  durations: _sessionDurations.keys.toList(),
-                  distances: _distances.keys.toList(),
-                  nearby: _nearby.values.toList(growable: false),
-                  hasRequests: _requests.isNotEmpty,
-                  onStart: _startSession,
-                  onEnd: _endSession,
-                  onDurationChanged: (v) =>
-                      setState(() => _durationLabel = v),
-                  onDistanceChanged: (v) =>
-                      setState(() => _distanceLabel = v),
-                  onGear: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const ProfileSettingsScreen(),
-                    ),
+    return ValueListenableBuilder<SessionState>(
+      valueListenable: AppServices.I.session.state,
+      builder: (context, sessionState, _) {
+        final active = sessionState is SessionActive;
+        final immersive = _page == _homeIndex && active;
+        return Scaffold(
+          backgroundColor: immersive ? Colors.black : Colors.white,
+          body: SafeArea(
+            bottom: false,
+            child: Column(
+              children: [
+                ValueListenableBuilder<bool>(
+                  valueListenable: AppServices.I.settings.incognitoScan,
+                  builder: (context, incognito, _) => _SharedHeader(
+                    page: _page,
+                    immersive: immersive,
+                    incognito: incognito,
+                    onIncognito: _setIncognito,
+                    onPrev: () => _goToPage(_page - 1),
+                    onNext: () => _goToPage(_page + 1),
                   ),
-                  onPersonTap: _openProfile,
-                  onOpenSheet: () => _openConnectSheet(context),
                 ),
-                discover: const DiscoverHistoryScreen(embedded: true),
-                messages: const AllMessagesScreen(
-                  embedded: true,
-                  messages: kSampleMessages,
+                _PageTitleStrip(
+                  position: _pagePos,
+                  titles: ['Discover', active ? 'Meet' : 'Home', 'Messages'],
+                  immersive: immersive,
                 ),
-              ),
+                Expanded(
+                  child: _PeekCarousel(
+                    position: _pagePos,
+                    onDragStart: () => _pageAnim.stop(),
+                    onSnap: _goToPage,
+                    home: _DiscoverCard(
+                      photoPath: hasPhoto ? photo : null,
+                      sessionState: sessionState,
+                      pendingCount: _pendingCount,
+                      onStart: _startSession,
+                      onEnd: _endSession,
+                      onGear: _openSettings,
+                      onPersonTap: _openProfile,
+                      onOpenSheet: () => _openConnectSheet(context),
+                    ),
+                    discover: const DiscoverHistoryScreen(embedded: true),
+                    messages: const AllMessagesScreen(embedded: true),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
@@ -696,42 +570,26 @@ class _PageTitleStrip extends StatelessWidget {
 class _DiscoverCard extends StatelessWidget {
   const _DiscoverCard({
     required this.photoPath,
-    required this.discoverable,
-    required this.incognito,
-    required this.starting,
-    required this.remaining,
-    required this.durationLabel,
-    required this.distanceLabel,
-    required this.durations,
-    required this.distances,
-    required this.nearby,
-    required this.hasRequests,
+    required this.sessionState,
+    required this.pendingCount,
     required this.onStart,
     required this.onEnd,
-    required this.onDurationChanged,
-    required this.onDistanceChanged,
     required this.onGear,
     required this.onPersonTap,
     required this.onOpenSheet,
   });
 
   final String? photoPath;
-  final bool discoverable;
-  final bool incognito;
-  final bool starting;
-  final Duration remaining;
-  final String durationLabel;
-  final String distanceLabel;
-  final List<String> durations;
-  final List<String> distances;
-  final List<_NearbyPerson> nearby;
-  final bool hasRequests;
+  final SessionState sessionState;
+
+  /// Shared pull-up badge stream — subscribed once at this widget's stable
+  /// root so switching Home ⇄ Meet never re-listens the single-listener
+  /// repo stream.
+  final Stream<int> pendingCount;
   final VoidCallback onStart;
   final VoidCallback onEnd;
-  final ValueChanged<String> onDurationChanged;
-  final ValueChanged<String> onDistanceChanged;
   final VoidCallback onGear;
-  final void Function(_NearbyPerson) onPersonTap;
+  final void Function(NearbyPeer) onPersonTap;
   final VoidCallback onOpenSheet;
 
   static const _idleGradient = LinearGradient(
@@ -747,28 +605,79 @@ class _DiscoverCard extends StatelessWidget {
     colors: [Colors.black, Color(0xFF0E3B21), Color(0xFF3BA55C)],
   );
 
-  String _format(Duration d) {
-    final h = d.inHours;
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  /// Duration picker options (DESIGN_SPEC §4.1).
+  static const _durationOptions = <String, Duration>{
+    '30 min': Duration(minutes: 30),
+    '1 hr': Duration(hours: 1),
+    '2 hrs': Duration(hours: 2),
+    '4 hrs': Duration(hours: 4),
+    '8 hrs': Duration(hours: 8),
+  };
+
+  /// Distance budget options (DESIGN_SPEC §4.1).
+  static const _distanceOptions = <String, double>{
+    '2 mts': 2,
+    '5 mts': 5,
+    '10 mts': 10,
+  };
+
+  static String _durationLabel(Duration d) {
+    for (final e in _durationOptions.entries) {
+      if (e.value == d) return e.key;
+    }
+    if (d.inMinutes < 60) return '${d.inMinutes} min';
+    return d.inHours == 1 ? '1 hr' : '${d.inHours} hrs';
+  }
+
+  static String _distanceLabel(double m) {
+    for (final e in _distanceOptions.entries) {
+      if (e.value == m) return e.key;
+    }
+    return m == m.roundToDouble() ? '${m.round()} mts' : '$m mts';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: discoverable ? _meetGradient : _idleGradient,
-      ),
-      child: discoverable ? _buildActive(context) : _buildIdle(context),
+    final active = sessionState is SessionActive;
+    return StreamBuilder<int>(
+      stream: pendingCount,
+      builder: (context, snap) {
+        final pending = snap.data ?? 0;
+        return ValueListenableBuilder<bool>(
+          valueListenable: AppServices.I.settings.reduceMotion,
+          builder: (context, reduceMotion, _) {
+            // A2: red ⇄ green gradient cross-fade (~600 ms).
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeInOut,
+              decoration: BoxDecoration(
+                gradient: active ? _meetGradient : _idleGradient,
+              ),
+              child: active
+                  ? _buildActive(context, sessionState as SessionActive,
+                      pending, reduceMotion)
+                  : _buildIdle(context, pending, reduceMotion),
+            );
+          },
+        );
+      },
     );
   }
 
-  Widget _buildIdle(BuildContext context) {
+  Widget _buildIdle(BuildContext context, int pending, bool reduceMotion) {
+    final settings = AppServices.I.settings;
+    final starting = sessionState is SessionStarting;
     return Column(
       children: [
         const SizedBox(height: 40),
-        _CenterAvatar(photoPath: photoPath, onGear: onGear),
+        ValueListenableBuilder<MoodRing>(
+          valueListenable: settings.mood,
+          builder: (context, mood, _) => _CenterAvatar(
+            photoPath: photoPath,
+            ringColor: mood.color,
+            onGear: onGear,
+          ),
+        ),
         const SizedBox(height: 26),
         const Text(
           'You are not discoverable',
@@ -793,52 +702,74 @@ class _DiscoverCard extends StatelessWidget {
         const SizedBox(height: 34),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: _DarkSettingRow(
-            label: 'Discoverable for the next',
-            value: durationLabel,
-            options: durations,
-            onChanged: onDurationChanged,
+          child: ValueListenableBuilder<Duration>(
+            valueListenable: settings.discoverableDuration,
+            builder: (context, duration, _) => _DarkSettingRow(
+              label: 'Discoverable for the next',
+              value: _durationLabel(duration),
+              options: _durationOptions.keys.toList(),
+              onChanged: (v) {
+                final picked = _durationOptions[v];
+                if (picked != null) settings.setDiscoverableDuration(picked);
+              },
+            ),
           ),
         ),
         const SizedBox(height: 18),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: _DarkSettingRow(
-            label: 'Set Distance',
-            value: distanceLabel,
-            options: distances,
-            onChanged: onDistanceChanged,
+          child: ValueListenableBuilder<double>(
+            valueListenable: settings.distanceBudget,
+            builder: (context, meters, _) => _DarkSettingRow(
+              label: 'Set Distance',
+              value: _distanceLabel(meters),
+              options: _distanceOptions.keys.toList(),
+              onChanged: (v) {
+                final picked = _distanceOptions[v];
+                if (picked != null) settings.setDistanceBudget(picked);
+              },
+            ),
           ),
         ),
         const Spacer(),
-        _PullUpIndicator(active: hasRequests, onOpen: onOpenSheet),
+        _PullUpIndicator(
+          pending: pending,
+          reduceMotion: reduceMotion,
+          onOpen: onOpenSheet,
+        ),
         SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
       ],
     );
   }
 
-  Widget _buildActive(BuildContext context) {
+  Widget _buildActive(BuildContext context, SessionActive state, int pending,
+      bool reduceMotion) {
     return Column(
       children: [
         Expanded(
-          child: _MeetRadar(
-            photoPath: photoPath,
-            nearby: nearby,
-            onGear: onGear,
-            onPersonTap: onPersonTap,
+          child: ValueListenableBuilder<double>(
+            valueListenable: AppServices.I.settings.distanceBudget,
+            builder: (context, maxMeters, _) => _MeetRadar(
+              photoPath: photoPath,
+              maxMeters: maxMeters,
+              reduceMotion: reduceMotion,
+              onGear: onGear,
+              onPersonTap: onPersonTap,
+            ),
           ),
         ),
         Text(
-          incognito ? 'You are in incognito mode' : 'You are discoverable',
+          state.incognito
+              ? 'You are in incognito mode'
+              : 'You are discoverable',
           textAlign: TextAlign.center,
           style: const TextStyle(
               fontSize: 23, fontWeight: FontWeight.w800, color: Colors.white),
         ),
         const SizedBox(height: 6),
-        Text(
-          'Time Remaining: ${_format(remaining)}',
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 15, color: Color(0xFFD7ECDC)),
+        _CountdownText(
+          remaining: AppServices.I.session.remaining,
+          reduceMotion: reduceMotion,
         ),
         const SizedBox(height: 22),
         Padding(
@@ -846,9 +777,78 @@ class _DiscoverCard extends StatelessWidget {
           child: _LetsGoButton(label: 'End Session', onPressed: onEnd),
         ),
         const SizedBox(height: 12),
-        _PullUpIndicator(active: hasRequests, onOpen: onOpenSheet),
+        _PullUpIndicator(
+          pending: pending,
+          reduceMotion: reduceMotion,
+          onOpen: onOpenSheet,
+        ),
         SizedBox(height: MediaQuery.of(context).padding.bottom + 14),
       ],
+    );
+  }
+}
+
+/// "Time Remaining: 04:00" — live tick from the session service; the final
+/// 30 s pulse red (A14). At reduced motion the text turns red without pulsing.
+class _CountdownText extends StatefulWidget {
+  const _CountdownText({required this.remaining, required this.reduceMotion});
+
+  final ValueListenable<Duration> remaining;
+  final bool reduceMotion;
+
+  @override
+  State<_CountdownText> createState() => _CountdownTextState();
+}
+
+class _CountdownTextState extends State<_CountdownText>
+    with SingleTickerProviderStateMixin {
+  static const _base = Color(0xFFD7ECDC);
+  static const _urgentWindow = Duration(seconds: 30);
+
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 500),
+  );
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<Duration>(
+      valueListenable: widget.remaining,
+      builder: (context, d, _) {
+        final urgent = d > Duration.zero && d <= _urgentWindow;
+        if (urgent && !widget.reduceMotion) {
+          if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
+        } else if (_pulse.isAnimating) {
+          _pulse
+            ..stop()
+            ..value = 0;
+        }
+        return AnimatedBuilder(
+          animation: _pulse,
+          builder: (context, _) {
+            final color = !urgent
+                ? _base
+                : widget.reduceMotion
+                    ? AppColors.brandRed
+                    : Color.lerp(_base, AppColors.brandRed, _pulse.value)!;
+            return Text(
+              'Time Remaining: ${TimeFormat.countdown(d)}',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 15,
+                color: color,
+                fontWeight: urgent ? FontWeight.w700 : FontWeight.w400,
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -889,17 +889,25 @@ class _LetsGoButton extends StatelessWidget {
 
 /// Pull-up affordance for the connection-request sheet.
 ///
-/// When [active] (a request is pending) the chevron animation plays and a
-/// tap / swipe-up opens the sheet. Otherwise it sits static and inert.
+/// With pending requests the chevron animation plays (A7 — static at reduced
+/// motion) and a badge shows the count. Tapping / swiping up always opens the
+/// sheet (its empty state explains when there is nothing).
 class _PullUpIndicator extends StatelessWidget {
-  const _PullUpIndicator({required this.active, required this.onOpen});
+  const _PullUpIndicator({
+    required this.pending,
+    required this.reduceMotion,
+    required this.onOpen,
+  });
 
-  final bool active;
+  final int pending;
+  final bool reduceMotion;
   final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final chevron = SizedBox(
+    final active = pending > 0;
+    final animate = active && !reduceMotion;
+    Widget chevron = SizedBox(
       width: 54,
       height: 34,
       child: Opacity(
@@ -909,18 +917,40 @@ class _PullUpIndicator extends StatelessWidget {
               const ColorFilter.mode(Colors.white, BlendMode.srcIn),
           child: Lottie.asset(
             'assets/animation/pull-up.json',
-            repeat: active,
-            animate: active,
+            repeat: animate,
+            animate: animate,
             fit: BoxFit.contain,
           ),
         ),
       ),
     );
 
-    if (!active) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 60, vertical: 4),
-        child: chevron,
+    if (active) {
+      chevron = Stack(
+        clipBehavior: Clip.none,
+        children: [
+          chevron,
+          Positioned(
+            top: -4,
+            right: -8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColors.brandRed,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white, width: 1.5),
+              ),
+              child: Text(
+                '$pending',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ],
       );
     }
 
@@ -943,46 +973,105 @@ class _PullUpIndicator extends StatelessWidget {
 class _MeetRadar extends StatefulWidget {
   const _MeetRadar({
     required this.photoPath,
-    required this.nearby,
+    required this.maxMeters,
+    required this.reduceMotion,
     required this.onGear,
     required this.onPersonTap,
   });
 
   final String? photoPath;
-  final List<_NearbyPerson> nearby;
+  final double maxMeters;
+  final bool reduceMotion;
   final VoidCallback onGear;
-  final void Function(_NearbyPerson) onPersonTap;
+  final void Function(NearbyPeer) onPersonTap;
 
   @override
   State<_MeetRadar> createState() => _MeetRadarState();
 }
 
 class _MeetRadarState extends State<_MeetRadar>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
+  static const _maxBubbles = 5;
+
+  /// Fresh single-listener stream per radar mount (a new _MeetRadar is
+  /// created for every session, so re-listening is always safe).
+  StreamSubscription<List<NearbyPeer>>? _sub;
+
+  /// Visible peers keyed by displayKey, plus peers currently fading out.
+  final Map<String, NearbyPeer> _peers = {};
+  final Map<String, NearbyPeer> _leaving = {};
+
   late final AnimationController _pulse = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 2800),
-  )..repeat();
+  );
+  late final AnimationController _float = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 4),
+  );
 
-  static const _slots = <Alignment>[
-    Alignment(-0.66, -0.18),
-    Alignment(0.66, -0.48),
-    Alignment(-0.66, 0.42),
-    Alignment(0.66, 0.42),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _sub = AppServices.I.session.nearby.listen(_onPeers);
+    _syncMotion();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MeetRadar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.reduceMotion != widget.reduceMotion) _syncMotion();
+  }
 
   @override
   void dispose() {
+    _sub?.cancel();
     _pulse.dispose();
+    _float.dispose();
     super.dispose();
+  }
+
+  /// A3/A5 loops run only when motion is allowed.
+  void _syncMotion() {
+    if (widget.reduceMotion) {
+      _pulse.stop();
+      _float
+        ..stop()
+        ..value = 0;
+    } else {
+      if (!_pulse.isAnimating) _pulse.repeat();
+      if (!_float.isAnimating) _float.repeat();
+    }
+  }
+
+  void _onPeers(List<NearbyPeer> peers) {
+    if (!mounted) return;
+    setState(() {
+      final next = <String, NearbyPeer>{
+        // Engine emits nearest-first — keep the ~5 closest.
+        for (final p in peers.take(_maxBubbles)) p.displayKey: p,
+      };
+      for (final entry in _peers.entries) {
+        if (!next.containsKey(entry.key)) _leaving[entry.key] = entry.value;
+      }
+      _leaving.removeWhere((key, _) => next.containsKey(key));
+      _peers
+        ..clear()
+        ..addAll(next);
+    });
+  }
+
+  /// Radial placement ∝ estimated distance; angle stable per peer.
+  Alignment _alignmentFor(NearbyPeer p) {
+    final angle = (p.displayKey.hashCode % 360) * math.pi / 180.0;
+    final frac =
+        (p.meters / math.max(widget.maxMeters, 0.1)).clamp(0.12, 1.0);
+    final r = 0.30 + 0.55 * frac;
+    return Alignment(math.cos(angle) * r, math.sin(angle) * r * 0.85);
   }
 
   @override
   Widget build(BuildContext context) {
-    final sorted = [...widget.nearby]
-      ..sort((a, b) => a.meters.compareTo(b.meters));
-    final visible = sorted.take(_slots.length).toList();
-
     return Stack(
       alignment: Alignment.center,
       clipBehavior: Clip.none,
@@ -990,24 +1079,87 @@ class _MeetRadarState extends State<_MeetRadar>
         const Positioned.fill(
           child: CustomPaint(painter: _RingsPainter()),
         ),
-        // Continuous pulse emanating from the centre while the session runs.
-        Positioned.fill(
-          child: AnimatedBuilder(
-            animation: _pulse,
-            builder: (_, _) =>
-                CustomPaint(painter: _PulsePainter(_pulse.value)),
-          ),
-        ),
-        for (var i = 0; i < visible.length; i++)
-          Align(
-            alignment: _slots[i],
-            child: _NearbyAvatar(
-              person: visible[i],
-              onTap: () => widget.onPersonTap(visible[i]),
+        // Continuous pulse emanating from the centre while the session runs
+        // (A3; suppressed at reduced motion).
+        if (!widget.reduceMotion)
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: _pulse,
+              builder: (_, _) =>
+                  CustomPaint(painter: _PulsePainter(_pulse.value)),
             ),
           ),
-        _CenterAvatar(photoPath: widget.photoPath, onGear: widget.onGear),
+        for (final peer in _leaving.values)
+          AnimatedAlign(
+            key: ValueKey('leave-${peer.displayKey}'),
+            alignment: _alignmentFor(peer),
+            duration: const Duration(milliseconds: 600),
+            curve: Curves.easeOut,
+            child: _exitBubble(peer),
+          ),
+        for (final peer in _peers.values)
+          AnimatedAlign(
+            key: ValueKey('peer-${peer.displayKey}'),
+            alignment: _alignmentFor(peer),
+            duration: const Duration(milliseconds: 600),
+            curve: Curves.easeOut,
+            child: _enterBubble(peer),
+          ),
+        ValueListenableBuilder<MoodRing>(
+          valueListenable: AppServices.I.settings.mood,
+          builder: (context, mood, _) => _CenterAvatar(
+            photoPath: widget.photoPath,
+            ringColor: mood.color,
+            onGear: widget.onGear,
+          ),
+        ),
       ],
+    );
+  }
+
+  /// A4 enter: scale 0.6→1 + fade (~350 ms) with a soft overshoot.
+  Widget _enterBubble(NearbyPeer peer) {
+    return TweenAnimationBuilder<double>(
+      key: ValueKey('in-${peer.displayKey}'),
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOutBack,
+      builder: (context, t, child) => Opacity(
+        opacity: t.clamp(0.0, 1.0),
+        child: Transform.scale(scale: 0.6 + 0.4 * t, child: child),
+      ),
+      child: _floating(peer, _NearbyAvatar(
+        peer: peer,
+        onTap: peer.card == null ? null : () => widget.onPersonTap(peer),
+      )),
+    );
+  }
+
+  /// A4 exit: fade out (~250 ms), then drop from the overlay.
+  Widget _exitBubble(NearbyPeer peer) {
+    return TweenAnimationBuilder<double>(
+      key: ValueKey('out-${peer.displayKey}'),
+      tween: Tween(begin: 1, end: 0),
+      duration: const Duration(milliseconds: 250),
+      onEnd: () {
+        if (mounted) setState(() => _leaving.remove(peer.displayKey));
+      },
+      builder: (context, t, child) => Opacity(opacity: t, child: child),
+      child: IgnorePointer(child: _floating(peer, _NearbyAvatar(peer: peer))),
+    );
+  }
+
+  /// A5 idle float: gentle per-peer sine drift ±6 px off one shared loop.
+  Widget _floating(NearbyPeer peer, Widget child) {
+    if (widget.reduceMotion) return child;
+    final phase = (peer.displayKey.hashCode % 628) / 100.0;
+    return AnimatedBuilder(
+      animation: _float,
+      builder: (context, inner) {
+        final dy = math.sin(2 * math.pi * _float.value + phase) * 6.0;
+        return Transform.translate(offset: Offset(0, dy), child: inner);
+      },
+      child: child,
     );
   }
 }
@@ -1061,40 +1213,44 @@ class _RingsPainter extends CustomPainter {
   bool shouldRepaint(covariant _RingsPainter oldDelegate) => false;
 }
 
+/// One floating peer bubble: card avatar (or a dashed placeholder while the
+/// GATT card read is still in flight) plus the white distance chip.
 class _NearbyAvatar extends StatelessWidget {
-  const _NearbyAvatar({required this.person, required this.onTap});
+  const _NearbyAvatar({required this.peer, this.onTap});
 
-  final _NearbyPerson person;
-  final VoidCallback onTap;
+  final NearbyPeer peer;
+  final VoidCallback? onTap;
 
-  String _fmt(double m) =>
-      m < 1 ? '${m.toStringAsFixed(1)} mtr' : '${m.toStringAsFixed(m < 10 ? 1 : 0)} mtr';
+  String _fmt(double m) => m < 1
+      ? '${m.toStringAsFixed(1)} mtr'
+      : '${m.toStringAsFixed(m < 10 ? 1 : 0)} mtr';
 
   @override
   Widget build(BuildContext context) {
+    final card = peer.card;
     return GestureDetector(
       onTap: onTap,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: AppColors.discoverActive, width: 3),
-            ),
-            child: ClipOval(
-              child: Image.network(
-                person.photoUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Container(
-                  color: AppColors.discoverActive.withValues(alpha: 0.4),
-                  child: const Icon(Icons.person, color: Colors.white),
-                ),
+          if (card != null)
+            PeerAvatar(
+              card: card,
+              size: 58,
+              ringColor: peer.mood.color,
+              ringWidth: 3,
+              showVerified: true,
+            )
+          else
+            const SizedBox(
+              width: 64,
+              height: 64,
+              child: CustomPaint(
+                painter: _DashedRingPainter(),
+                child: Icon(Icons.person_outline,
+                    color: Colors.white54, size: 28),
               ),
             ),
-          ),
           const SizedBox(height: 6),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -1103,7 +1259,7 @@ class _NearbyAvatar extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
-              _fmt(person.meters),
+              _fmt(peer.meters),
               style: const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
@@ -1117,10 +1273,49 @@ class _NearbyAvatar extends StatelessWidget {
   }
 }
 
+/// Neutral dashed ring shown before a peer's profile card has been read.
+class _DashedRingPainter extends CustomPainter {
+  const _DashedRingPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final r = size.shortestSide / 2 - 1.5;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..color = Colors.white.withValues(alpha: 0.65);
+    const dashes = 14;
+    const gapFrac = 0.45;
+    final sweep = 2 * math.pi / dashes;
+    for (var i = 0; i < dashes; i++) {
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: r),
+        i * sweep,
+        sweep * (1 - gapFrac),
+        false,
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRingPainter oldDelegate) => false;
+}
+
 class _CenterAvatar extends StatelessWidget {
-  const _CenterAvatar({required this.photoPath, required this.onGear});
+  const _CenterAvatar({
+    required this.photoPath,
+    required this.ringColor,
+    required this.onGear,
+  });
 
   final String? photoPath;
+
+  /// Mood ring color (DESIGN_SPEC §11.1) — mirrors what peers see in the
+  /// BLE advertisement.
+  final Color ringColor;
   final VoidCallback onGear;
 
   @override
@@ -1133,7 +1328,7 @@ class _CenterAvatar extends StatelessWidget {
           height: 112,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            border: Border.all(color: AppColors.brandRed, width: 4),
+            border: Border.all(color: ringColor, width: 4),
             color: Colors.white,
           ),
           child: ClipOval(
@@ -1191,6 +1386,8 @@ class _DarkSettingRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // A persisted value outside the preset list must still render.
+    final items = options.contains(value) ? options : [value, ...options];
     return Row(
       children: [
         Expanded(
@@ -1217,7 +1414,7 @@ class _DarkSettingRow extends StatelessWidget {
               decoration: TextDecoration.underline,
               decorationColor: Colors.white,
             ),
-            items: options
+            items: items
                 .map((o) => DropdownMenuItem(
                       value: o,
                       child: Text(o,
@@ -1240,30 +1437,34 @@ class _DarkSettingRow extends StatelessWidget {
 
 class _ConnectSheetModal extends StatefulWidget {
   const _ConnectSheetModal({
-    required this.requests,
     required this.onAccept,
     required this.onDecline,
+    required this.onExpand,
   });
 
-  final List<_ConnReq> requests;
-  final void Function(_ConnReq) onAccept;
-  final void Function(_ConnReq) onDecline;
+  final Future<void> Function(ConnectionRequest) onAccept;
+  final Future<void> Function(ConnectionRequest) onDecline;
+
+  /// Invoked after the sheet closes itself because it was dragged to its
+  /// full extent (or "See all" was tapped) — pushes the full-page list.
+  final VoidCallback onExpand;
 
   @override
   State<_ConnectSheetModal> createState() => _ConnectSheetModalState();
 }
 
 class _ConnectSheetModalState extends State<_ConnectSheetModal> {
-  late final List<_ConnReq> _items = List.of(widget.requests);
+  /// Fresh single-listener stream per sheet opening.
+  late final Stream<List<ConnectionRequest>> _requests =
+      AppServices.I.requests.watchIncomingPending();
 
-  void _accept(_ConnReq r) {
-    widget.onAccept(r);
-    setState(() => _items.remove(r));
-  }
+  bool _expanded = false;
 
-  void _decline(_ConnReq r) {
-    widget.onDecline(r);
-    setState(() => _items.remove(r));
+  void _goFull() {
+    if (_expanded) return;
+    _expanded = true;
+    Navigator.of(context).pop();
+    widget.onExpand();
   }
 
   @override
@@ -1274,103 +1475,133 @@ class _ConnectSheetModalState extends State<_ConnectSheetModal> {
         ((media.size.height - media.padding.top - 8) / media.size.height)
             .clamp(0.6, 0.94);
 
-    return DraggableScrollableSheet(
-      initialChildSize: 0.6,
-      minChildSize: 0.45,
-      maxChildSize: maxFrac,
-      snap: true,
-      snapSizes: [0.6],
-      expand: false,
-      builder: (context, scrollController) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            boxShadow: [
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 20,
-                offset: Offset(0, -4),
-              ),
-            ],
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: CustomScrollView(
-            controller: scrollController,
-            slivers: [
-              SliverToBoxAdapter(
-                child: Column(
-                  children: [
-                    const SizedBox(height: 10),
-                    Container(
-                      width: 44,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFDADADA),
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Connect',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.black,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (_items.isEmpty)
-                const SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: Padding(
-                    padding: EdgeInsets.only(bottom: 60),
-                    child: Center(
-                      child: Text(
-                        'No new friend request',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black,
-                        ),
-                      ),
-                    ),
-                  ),
-                )
-              else ...[
-                const SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
-                    child: Text(
-                      'Connection Request',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.black,
-                      ),
-                    ),
-                  ),
-                ),
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, i) => _SheetRequestTile(
-                      request: _items[i],
-                      onAccept: () => _accept(_items[i]),
-                      onDecline: () => _decline(_items[i]),
-                    ),
-                    childCount: _items.length,
-                  ),
-                ),
-                SliverToBoxAdapter(
-                  child: SizedBox(height: 24 + media.padding.bottom),
+    return NotificationListener<DraggableScrollableNotification>(
+      onNotification: (n) {
+        // Dragged all the way up → hand off to the full page (§7.2).
+        if (n.extent >= n.maxExtent - 0.005) _goFull();
+        return false;
+      },
+      child: DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.45,
+        maxChildSize: maxFrac,
+        snap: true,
+        snapSizes: const [0.6],
+        expand: false,
+        builder: (context, scrollController) {
+          return Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0x33000000),
+                  blurRadius: 20,
+                  offset: Offset(0, -4),
                 ),
               ],
-            ],
-          ),
-        );
-      },
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: StreamBuilder<List<ConnectionRequest>>(
+              stream: _requests,
+              builder: (context, snap) {
+                final items = snap.data ?? const <ConnectionRequest>[];
+                return CustomScrollView(
+                  controller: scrollController,
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 10),
+                          Container(
+                            width: 44,
+                            height: 5,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDADADA),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Connect',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.black,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (items.isEmpty)
+                      const SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Padding(
+                          padding: EdgeInsets.only(bottom: 60),
+                          child: Center(
+                            child: Text(
+                              'No new friend request',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                    else ...[
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                          child: Row(
+                            children: [
+                              const Expanded(
+                                child: Text(
+                                  'Connection Request',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.black,
+                                  ),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: _goFull,
+                                child: const Text(
+                                  'See all',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.brandRed,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (context, i) => _SheetRequestTile(
+                            request: items[i],
+                            onAccept: () => widget.onAccept(items[i]),
+                            onDecline: () => widget.onDecline(items[i]),
+                          ),
+                          childCount: items.length,
+                        ),
+                      ),
+                      SliverToBoxAdapter(
+                        child: SizedBox(height: 24 + media.padding.bottom),
+                      ),
+                    ],
+                  ],
+                );
+              },
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -1382,53 +1613,58 @@ class _SheetRequestTile extends StatelessWidget {
     required this.onDecline,
   });
 
-  final _ConnReq request;
+  final ConnectionRequest request;
   final VoidCallback onAccept;
   final VoidCallback onDecline;
 
   @override
   Widget build(BuildContext context) {
+    final card = request.card;
+    final note = request.note;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Row(
         children: [
-          ClipOval(
-            child: Image.network(
-              request.photoUrl,
-              width: 52,
-              height: 52,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => _InitialAvatar(name: request.name),
-            ),
-          ),
+          PeerAvatar(card: card, size: 52, showVerified: true),
           const SizedBox(width: 12),
           Expanded(
-            child: GestureDetector(
-              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                builder: (_) => ConnectedProfileScreen(
-                  name: request.name,
-                  title: request.title,
-                  company: request.company,
-                  bio: '${request.title} at ${request.company}.',
-                  photoUrl: request.photoUrl,
-                ),
-              )),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(request.name,
-                      style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black)),
-                  Text(request.title,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(card.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black)),
+                if (card.designation.isNotEmpty)
+                  Text(card.designation,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           fontSize: 13, color: Color(0xFF6B6B6B))),
-                  Text(request.company,
+                if (card.company.isNotEmpty)
+                  Text(card.company,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           fontSize: 13, color: Color(0xFF6B6B6B))),
-                ],
-              ),
+                if (note != null && note.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      '“$note”',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                        color: Color(0xFF8A8A8A),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           const SizedBox(width: 8),
@@ -1486,32 +1722,6 @@ class _GrayBtn extends StatelessWidget {
               fontSize: 13,
               fontWeight: FontWeight.w600,
               color: Color(0xFF6B6B6B))),
-    );
-  }
-}
-
-class _InitialAvatar extends StatelessWidget {
-  const _InitialAvatar({required this.name});
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    final initials =
-        name.split(' ').take(2).map((w) => w.isNotEmpty ? w[0] : '').join();
-    return Container(
-      width: 52,
-      height: 52,
-      decoration: const BoxDecoration(
-        shape: BoxShape.circle,
-        color: Color(0xFFB7D9F2),
-      ),
-      child: Center(
-        child: Text(initials.toUpperCase(),
-            style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-                color: Colors.white)),
-      ),
     );
   }
 }
@@ -1616,46 +1826,3 @@ class _IncognitoHatPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _IncognitoHatPainter oldDelegate) => false;
 }
-
-// ─── Data models + seed ──────────────────────────────────────────────────────
-
-class _NearbyPerson {
-  const _NearbyPerson({
-    required this.id,
-    required this.meters,
-    required this.photoUrl,
-    required this.name,
-  });
-
-  final String id;
-  final double meters;
-  final String photoUrl;
-  final String name;
-}
-
-class _ConnReq {
-  const _ConnReq({
-    required this.id,
-    required this.name,
-    required this.title,
-    required this.company,
-    required this.photoUrl,
-  });
-
-  final String id;
-  final String name;
-  final String title;
-  final String company;
-  final String photoUrl;
-}
-
-const _seedRequests = <_ConnReq>[
-  _ConnReq(id: 'c1', name: 'Liam Smith', title: 'CTO', company: 'TechCorp', photoUrl: 'https://i.pravatar.cc/150?img=12'),
-  _ConnReq(id: 'c2', name: 'Olivia Rhye', title: 'CEO', company: 'Company', photoUrl: 'https://i.pravatar.cc/150?img=47'),
-  _ConnReq(id: 'c3', name: 'Emma John', title: 'CFO', company: 'Finance Inc.', photoUrl: 'https://i.pravatar.cc/150?img=49'),
-  _ConnReq(id: 'c4', name: 'Liam Smith', title: 'CTO', company: 'TechCorp', photoUrl: 'https://i.pravatar.cc/150?img=13'),
-  _ConnReq(id: 'c5', name: 'Olivia Rhye', title: 'CEO', company: 'Company', photoUrl: 'https://i.pravatar.cc/150?img=45'),
-  _ConnReq(id: 'c6', name: 'Emma John', title: 'CFO', company: 'Finance Inc.', photoUrl: 'https://i.pravatar.cc/150?img=44'),
-  _ConnReq(id: 'c7', name: 'Liam Smith', title: 'CTO', company: 'TechCorp', photoUrl: 'https://i.pravatar.cc/150?img=14'),
-  _ConnReq(id: 'c8', name: 'Olivia Rhye', title: 'CEO', company: 'Company', photoUrl: 'https://i.pravatar.cc/150?img=46'),
-];

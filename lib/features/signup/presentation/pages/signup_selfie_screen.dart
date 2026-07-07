@@ -27,11 +27,11 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
     if (_running) return;
     setState(() => _running = true);
     try {
-      final sessionId = await FaceVerificationService.instance
+      final session = await FaceVerificationService.instance
           .startLiveness(photoPath: _draft.photoPath);
       _draft.update(() {
-        _draft.livenessSessionId = sessionId;
-        _draft.photoUploaded = true;
+        _draft.livenessSessionId = session.sessionId;
+        _draft.verificationPhotoKey = session.photoKey;
       });
       if (!mounted) return;
       // Reset before navigating so the screen is interactive if the user pops
@@ -60,7 +60,10 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
   }
 
   void _skip() {
-    _draft.update(() => _draft.livenessSessionId = null);
+    _draft.update(() {
+      _draft.livenessSessionId = null;
+      _draft.verificationPhotoKey = null;
+    });
     context.push(AppRouter.signupVerifying);
   }
 

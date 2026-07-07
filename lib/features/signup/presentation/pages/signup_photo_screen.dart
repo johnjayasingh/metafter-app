@@ -131,9 +131,8 @@ class _SignupPhotoScreenState extends State<SignupPhotoScreen> {
         setState(() => _picking = false);
         return;
       }
+      // Photo fills the ring; the CTA flips to "Next" (DESIGN_SPEC §3.6).
       _draft.update(() => _draft.photoPath = file.path);
-      if (!mounted) return;
-      context.push(AppRouter.signupSelfie);
     } on Exception catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -152,11 +151,31 @@ class _SignupPhotoScreenState extends State<SignupPhotoScreen> {
     final hasPhoto = (_draft.photoPath ?? '').isNotEmpty;
     return SignupScaffold(
       title: 'Let’s add a profile photo',
-      bottomButton: MetafterPrimaryButton(
-        label: _picking
-            ? 'Opening gallery…'
-            : (hasPhoto ? 'Change Photo' : 'Add Photo'),
-        onPressed: _picking ? null : _onAddPhoto,
+      bottomButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          MetafterPrimaryButton(
+            label: _picking
+                ? 'Opening gallery…'
+                : (hasPhoto ? 'Next' : 'Add Photo'),
+            onPressed: _picking
+                ? null
+                : hasPhoto
+                    ? () => context.push(AppRouter.signupSelfie)
+                    : _onAddPhoto,
+          ),
+          if (hasPhoto)
+            TextButton(
+              onPressed: _picking ? null : _onAddPhoto,
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.textSecondary,
+              ),
+              child: const Text(
+                'Change Photo',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+            ),
+        ],
       ),
       child: Column(
         children: [

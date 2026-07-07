@@ -39,6 +39,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Required by the Amplify liveness/AWS SDKs (java.time etc. on minSdk).
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlin {
@@ -109,6 +111,7 @@ flutter {
 dependencies {
     // Amazon Rekognition Face Liveness UI (Jetpack Compose component).
     // Versions are a starting point — reconcile with your Kotlin/AGP/Compose setup.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     implementation("com.amplifyframework.ui:liveness:1.5.0")
     implementation(platform("androidx.compose:compose-bom:2024.09.00"))
     implementation("androidx.activity:activity-compose:1.9.2")

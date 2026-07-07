@@ -77,6 +77,9 @@ class EnvironmentConfig {
   static String get iotEndpoint {
     switch (_environment) {
       case Environment.local:
+        // Empty on purpose: the local flavor has no SigV4 IoT endpoint, so
+        // RelayTransportClient falls back to mailbox polling.
+        return '';
       case Environment.dev:
         return 'alubdyo9lpvuy-ats.iot.ap-south-1.amazonaws.com';
       case Environment.uat:

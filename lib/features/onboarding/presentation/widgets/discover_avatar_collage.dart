@@ -80,7 +80,7 @@ class _AvatarCircle extends StatelessWidget {
         image: DecorationImage(
           image: NetworkImage('https://i.pravatar.cc/200?img=$pravatarId'),
           fit: BoxFit.cover,
-          onError: (_, __) {},
+          onError: (_, _) {},
         ),
       ),
     );

@@ -30,6 +30,8 @@ class MockData {
     // Don't clobber a real persisted signup.
     if (!force && d.isOnboarded) return;
     if (!force && d.name.isNotEmpty) return;
+    // Only text fields are prefilled — verification state (livenessSessionId,
+    // verificationPhotoKey) and the photo must never be faked as done.
     d.update(() {
       d.name = name;
       d.email = email;

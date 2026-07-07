@@ -1,11 +1,14 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/auth/cognito_auth_service.dart';
+import '../../../../core/domain/models.dart';
 import '../../../../core/face/face_verification_service.dart';
 import '../../../../core/network/profile_api.dart';
 import '../../../../core/routes/app_router.dart';
+import '../../../../core/services/app_services.dart';
+import '../../../../core/services/bootstrap_services.dart';
+import '../../../../core/storage/secure_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/signup_draft.dart';
 import '../widgets/metafter_primary_button.dart';
@@ -14,8 +17,12 @@ import 'signup_photo_screen.dart' show SignupProfileCard;
 
 enum _VerifyState { verifying, verified, failed, skipped }
 
-/// Resolves the identity-verification verdict for the liveness session started
-/// on the previous screen, then lets the user finish signup.
+/// Final signup step (DESIGN_SPEC §3.7 "Verifying..").
+///
+/// Local-first: the profile row is persisted to the on-device DB and the
+/// relay transport is connected BEFORE the verification verdict resolves —
+/// verification only adds the badge. Nothing here may block "Done": every
+/// network step is best-effort.
 class SignupVerifyingScreen extends StatefulWidget {
   const SignupVerifyingScreen({super.key});
 
@@ -32,25 +39,88 @@ class _SignupVerifyingScreenState extends State<SignupVerifyingScreen> {
   @override
   void initState() {
     super.initState();
-    _resolve();
+    _run();
+  }
+
+  Future<void> _run() async {
+    // 1. Persist the local profile first — it is the post-signup source of
+    //    truth (the backend stores no profile data).
+    await _saveLocalProfile();
+
+    // 2. Bring the relay up so our public keys reach the directory.
+    //    connectTransport already swallows failures internally.
+    if (AppServices.isReady) {
+      await connectTransport();
+    }
+
+    // 3. Resolve the verification verdict (if a liveness session ran).
+    await _resolve();
+  }
+
+  Future<void> _saveLocalProfile() async {
+    try {
+      String? sub;
+      try {
+        sub = await CognitoAuthService.instance.currentSub();
+      } catch (e) {
+        debugPrint('currentSub failed: $e');
+      }
+      sub ??= await SecureStorageService().getUserId();
+      if (sub == null || sub.isEmpty) {
+        debugPrint('No sub available — profile save deferred');
+        return;
+      }
+      if (!AppServices.isReady) {
+        debugPrint('AppServices not ready — profile save deferred');
+        return;
+      }
+      final existing = AppServices.I.profile.profile.value;
+      await AppServices.I.profile.save(MyProfile(
+        sub: sub,
+        name: _draft.name,
+        role: _draft.role,
+        designation: _draft.designation,
+        company: _draft.company,
+        intro: _draft.introduction,
+        photoPath: _draft.photoPath,
+        verified: existing?.verified ?? false,
+        verifiedBadgeSig: existing?.verifiedBadgeSig,
+      ));
+    } catch (e) {
+      // Best-effort — a local hiccup must not trap the user here.
+      debugPrint('Local profile save failed: $e');
+    }
   }
 
   Future<void> _resolve() async {
     final sessionId = _draft.livenessSessionId;
-    if (sessionId == null) {
+    final photoKey = _draft.verificationPhotoKey;
+    if (sessionId == null || photoKey == null) {
       // Liveness was skipped / unavailable — nothing to resolve.
-      setState(() => _state = _VerifyState.skipped);
+      if (mounted) setState(() => _state = _VerifyState.skipped);
       return;
     }
-    setState(() => _state = _VerifyState.verifying);
+    if (mounted) setState(() => _state = _VerifyState.verifying);
     try {
-      final result = await FaceVerificationService.instance.resolve(sessionId);
+      final result =
+          await FaceVerificationService.instance.resolve(sessionId, photoKey);
+      if (result.verified) {
+        final badgeSig = result.badgeSig;
+        if (badgeSig != null && badgeSig.isNotEmpty && AppServices.isReady) {
+          try {
+            await AppServices.I.profile.markVerified(badgeSig);
+          } catch (e) {
+            debugPrint('markVerified failed: $e');
+          }
+        }
+      }
       if (!mounted) return;
       setState(() {
         _result = result;
         _state = result.verified ? _VerifyState.verified : _VerifyState.failed;
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Verification resolution failed: $e');
       if (!mounted) return;
       setState(() => _state = _VerifyState.failed);
     }
@@ -59,31 +129,8 @@ class _SignupVerifyingScreenState extends State<SignupVerifyingScreen> {
   Future<void> _onDone() async {
     if (_submitting) return;
     setState(() => _submitting = true);
-
-    // Best-effort: a sync hiccup shouldn't trap the user on this screen.
-    try {
-      await ProfileApi().putProfile(
-        displayName: _draft.name,
-        headline:
-            _draft.designation.isNotEmpty ? _draft.designation : _draft.role,
-        company: _draft.company,
-        bio: _draft.introduction,
-      );
-      // If liveness was skipped, the photo was never uploaded — do it now.
-      if (!_draft.photoUploaded &&
-          _draft.photoPath != null &&
-          _draft.photoPath!.isNotEmpty) {
-        await ProfileApi().uploadPhoto(File(_draft.photoPath!));
-        _draft.photoUploaded = true;
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Profile will finish syncing later. $e')),
-        );
-      }
-    }
-
+    // The draft stays around for re-login prefill; the MyProfile row saved in
+    // [_run] is the post-signup source of truth.
     await _draft.save();
     if (!mounted) return;
     context.go(AppRouter.home);
@@ -92,7 +139,7 @@ class _SignupVerifyingScreenState extends State<SignupVerifyingScreen> {
   String get _title {
     switch (_state) {
       case _VerifyState.verifying:
-        return 'Verifying…';
+        return 'Verifying..';
       case _VerifyState.verified:
         return 'Verified!';
       case _VerifyState.failed:
@@ -105,7 +152,7 @@ class _SignupVerifyingScreenState extends State<SignupVerifyingScreen> {
   String get _message {
     switch (_state) {
       case _VerifyState.verifying:
-        return 'We’re matching your face scan with your profile photo. This only takes a moment.';
+        return 'We’re verifying your photo. You can continue while we verify your photo in the background.';
       case _VerifyState.verified:
         return 'Your identity is verified. You can start meeting people around you.';
       case _VerifyState.failed:
@@ -124,7 +171,11 @@ class _SignupVerifyingScreenState extends State<SignupVerifyingScreen> {
 
   Widget _bottom() {
     if (_state == _VerifyState.verifying) {
-      return const MetafterPrimaryButton(label: 'Verifying…', onPressed: null);
+      // Verification must not block entry (DESIGN_SPEC §3.7).
+      return MetafterPrimaryButton(
+        label: _submitting ? 'Finishing…' : 'Done',
+        onPressed: _submitting ? null : _onDone,
+      );
     }
     if (_state == _VerifyState.failed) {
       return Column(
@@ -163,7 +214,8 @@ class _SignupVerifyingScreenState extends State<SignupVerifyingScreen> {
         children: [
           const SizedBox(height: 24),
           SignupProfileCard(
-            photoPath: null,
+            photoPath:
+                (_draft.photoPath ?? '').isNotEmpty ? _draft.photoPath : null,
             name: _draft.name,
             subtitle: subtitle,
           ),

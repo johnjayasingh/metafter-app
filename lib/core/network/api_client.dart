@@ -1,7 +1,20 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+
 import 'api_endpoints.dart';
 import 'api_exceptions.dart';
 import '../auth/cognito_auth_service.dart';
+
+/// Debug-only request logging. Release builds stay silent.
+void _log(String message) {
+  if (kDebugMode) debugPrint(message);
+}
+
+/// Never log credentials — replaces the Authorization value wholesale.
+Map<String, dynamic> _redactedHeaders(Map<String, dynamic> headers) => {
+      for (final e in headers.entries)
+        e.key: e.key.toLowerCase() == 'authorization' ? '<redacted>' : e.value,
+    };
 
 class ApiClient {
   static final ApiClient _instance = ApiClient._internal();
@@ -47,11 +60,11 @@ class ApiClient {
       options.headers['Authorization'] = 'Bearer $token';
     }
 
-    print('🚀 REQUEST[${options.method}] => PATH: ${options.path}');
-    print('🌐 BASE URL: ${options.baseUrl}');
-    print('📍 FULL URL: ${options.uri}');
-    print('📦 REQUEST BODY: ${options.data}');
-    print('🔑 HEADERS: ${options.headers}');
+    _log('🚀 REQUEST[${options.method}] => PATH: ${options.path}');
+    _log('🌐 BASE URL: ${options.baseUrl}');
+    _log('📍 FULL URL: ${options.uri}');
+    _log('📦 REQUEST BODY: ${options.data}');
+    _log('🔑 HEADERS: ${_redactedHeaders(options.headers)}');
     return handler.next(options);
   }
 
@@ -59,8 +72,8 @@ class ApiClient {
     Response response,
     ResponseInterceptorHandler handler,
   ) {
-    print('✅ RESPONSE[${response.statusCode}] => PATH: ${response.requestOptions.path}');
-    print('📦 RESPONSE DATA: ${response.data}');
+    _log('✅ RESPONSE[${response.statusCode}] => PATH: ${response.requestOptions.path}');
+    _log('📦 RESPONSE DATA: ${response.data}');
     return handler.next(response);
   }
 
@@ -68,11 +81,11 @@ class ApiClient {
     DioException error,
     ErrorInterceptorHandler handler,
   ) async {
-    print('❌ ERROR[${error.response?.statusCode}] => PATH: ${error.requestOptions.path}');
-    print('📄 ERROR TYPE: ${error.type}');
-    print('💬 ERROR MESSAGE: ${error.message}');
+    _log('❌ ERROR[${error.response?.statusCode}] => PATH: ${error.requestOptions.path}');
+    _log('📄 ERROR TYPE: ${error.type}');
+    _log('💬 ERROR MESSAGE: ${error.message}');
     if (error.response?.data != null) {
-      print('📦 ERROR DATA: ${error.response?.data}');
+      _log('📦 ERROR DATA: ${error.response?.data}');
     }
 
     // Handle auth failure on 401. Cognito's getSession() already refreshes
@@ -93,7 +106,7 @@ class ApiClient {
         // fall through to session timeout
       }
       _retriedAuth = false;
-      print('❌ No valid Cognito session. Session timeout.');
+      _log('❌ No valid Cognito session. Session timeout.');
       await _auth.signOut();
       if (onSessionTimeout != null) {
         onSessionTimeout!();
@@ -184,14 +197,14 @@ class ApiClient {
     }
 
     // Print detailed error information
-    print('🔍 HANDLING ERROR:');
-    print('   Status Code: $statusCode');
-    print('   Message: $message');
-    print('   Error Type: ${error.type}');
-    print('   Path: ${error.requestOptions.path}');
-    print('   Method: ${error.requestOptions.method}');
+    _log('🔍 HANDLING ERROR:');
+    _log('   Status Code: $statusCode');
+    _log('   Message: $message');
+    _log('   Error Type: ${error.type}');
+    _log('   Path: ${error.requestOptions.path}');
+    _log('   Method: ${error.requestOptions.method}');
     if (error.response?.data != null) {
-      print('   Response Data: ${error.response?.data}');
+      _log('   Response Data: ${error.response?.data}');
     }
 
     switch (error.type) {

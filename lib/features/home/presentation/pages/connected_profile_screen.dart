@@ -1,25 +1,23 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/domain/models.dart';
+import '../../../../core/services/app_services.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/peer_avatar.dart';
+import 'find_person_screen.dart';
 
-/// Full profile screen for a connected person.
-/// Shows bio, privacy preference toggles, and a Disconnect button.
+/// Full profile screen for an existing connection: bio, the invite note that
+/// came with the connection (when any), Find Person while the peer is in BLE
+/// range, and Disconnect (DESIGN_SPEC §5/§10 kebab profile summary).
 class ConnectedProfileScreen extends StatefulWidget {
   const ConnectedProfileScreen({
     super.key,
-    required this.name,
-    required this.title,
-    required this.company,
-    required this.bio,
-    required this.photoUrl,
+    required this.card,
     this.inviteNote,
   });
 
-  final String name;
-  final String title;
-  final String company;
-  final String bio;
-  final String photoUrl;
+  final ProfileCard card;
+
   /// Optional note that was sent with the connection invite.
   final String? inviteNote;
 
@@ -29,12 +27,55 @@ class ConnectedProfileScreen extends StatefulWidget {
 }
 
 class _ConnectedProfileScreenState extends State<ConnectedProfileScreen> {
-  bool _videoCall = true;
-  bool _audioCall = true;
-  bool _disappearingMessages = false;
+  bool _disconnecting = false;
+
+  Future<void> _confirmDisconnect() async {
+    if (_disconnecting) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Disconnect from ${widget.card.name}?'),
+        content: const Text(
+          'This removes your connection and the shared keys. Your chat '
+          'history stays on this device until you delete it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF6B6B6B))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Disconnect',
+                style: TextStyle(
+                    color: AppColors.brandRed, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _disconnecting = true);
+    await AppServices.I.connection.disconnect(widget.card.sub);
+    if (!mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  void _openFindPerson() {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => FindPersonScreen(card: widget.card),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
+    final card = widget.card;
+    final isNearby =
+        card.sub.isNotEmpty && AppServices.I.engine.isNearby(card.sub);
+
     return Scaffold(
       body: Stack(
         children: [
@@ -88,29 +129,18 @@ class _ConnectedProfileScreenState extends State<ConnectedProfileScreen> {
 
                 const SizedBox(height: 20),
 
-                // ── Avatar ──
-                Container(
-                  width: 110,
-                  height: 110,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.brandRed, width: 3),
-                    color: const Color(0xFFE3C8B5),
-                  ),
-                  child: ClipOval(
-                    child: Image.network(
-                      widget.photoUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          _InitialsAvatar(name: widget.name),
-                    ),
-                  ),
+                PeerAvatar(
+                  card: card,
+                  size: 110,
+                  showVerified: true,
+                  ringColor: Colors.white,
+                  ringWidth: 3,
                 ),
 
                 const SizedBox(height: 14),
 
                 Text(
-                  widget.name,
+                  card.name,
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
@@ -120,7 +150,7 @@ class _ConnectedProfileScreenState extends State<ConnectedProfileScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${widget.title} \u2013 ${widget.company}',
+                  card.titleLine,
                   style: const TextStyle(
                     fontSize: 14,
                     color: Color(0xFF6B6B6B),
@@ -132,7 +162,7 @@ class _ConnectedProfileScreenState extends State<ConnectedProfileScreen> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 32),
                   child: Text(
-                    widget.bio,
+                    card.intro,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontSize: 15,
@@ -168,58 +198,38 @@ class _ConnectedProfileScreenState extends State<ConnectedProfileScreen> {
                   ),
                 ],
 
-                const SizedBox(height: 24),
-
-                // ── Privacy preferences ──
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'PRIVACY PREFERENCES',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF8A8A8A),
-                          letterSpacing: 0.8,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      _ToggleRow(
-                        label: 'Video Call',
-                        value: _videoCall,
-                        onChanged: (v) => setState(() => _videoCall = v),
-                      ),
-                      const Divider(height: 1, color: Color(0xFFF0F0F0)),
-                      _ToggleRow(
-                        label: 'Audio Call',
-                        value: _audioCall,
-                        onChanged: (v) => setState(() => _audioCall = v),
-                      ),
-                      const Divider(height: 1, color: Color(0xFFF0F0F0)),
-                      _ToggleRow(
-                        label: 'Disappearing Messages',
-                        value: _disappearingMessages,
-                        onChanged: (v) =>
-                            setState(() => _disappearingMessages = v),
-                      ),
-                      const SizedBox(height: 10),
-                      const Text(
-                        'For added privacy, you can set who can call you and who can save your chats.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF8A8A8A),
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
                 const Spacer(),
 
-                // ── Disconnect button ──
+                // ── Find Person (only while in BLE range) ──
+                if (isNearby)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppColors.brandRed),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        onPressed: _openFindPerson,
+                        icon: const Icon(Icons.near_me_outlined,
+                            color: AppColors.brandRed),
+                        label: const Text(
+                          'Find Person',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.brandRed,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // ── Disconnect ──
                 Padding(
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
                   child: SizedBox(
@@ -232,10 +242,10 @@ class _ConnectedProfileScreenState extends State<ConnectedProfileScreen> {
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text(
-                        'Disconnect',
-                        style: TextStyle(
+                      onPressed: _disconnecting ? null : _confirmDisconnect,
+                      child: Text(
+                        _disconnecting ? 'Disconnecting…' : 'Disconnect',
+                        style: const TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w600,
                           color: Colors.white,
@@ -248,67 +258,6 @@ class _ConnectedProfileScreenState extends State<ConnectedProfileScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ToggleRow extends StatelessWidget {
-  const _ToggleRow({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-  });
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: Colors.black,
-              ),
-            ),
-          ),
-          Switch.adaptive(
-            value: value,
-            onChanged: onChanged,
-            activeColor: AppColors.brandRed,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InitialsAvatar extends StatelessWidget {
-  const _InitialsAvatar({required this.name});
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    final initials =
-        name.split(' ').take(2).map((w) => w.isNotEmpty ? w[0] : '').join();
-    return Container(
-      color: const Color(0xFFE3C8B5),
-      child: Center(
-        child: Text(
-          initials.toUpperCase(),
-          style: const TextStyle(
-            fontSize: 36,
-            fontWeight: FontWeight.w700,
-            color: Colors.white,
-          ),
-        ),
       ),
     );
   }

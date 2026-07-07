@@ -45,7 +45,7 @@ class _PricingScreenState extends State<PricingScreen> {
               )),
           const SizedBox(height: 10),
           const Text(
-            'We believe MetAfter should be accessible to all. Simple, transparent pricing',
+            'We believe MetAfter should be accessible to all. Simple, transparent pricing.',
             style: TextStyle(fontSize: 15, color: Color(0xFF4F4F4F), height: 1.4),
           ),
           const SizedBox(height: 22),
@@ -101,16 +101,17 @@ class _PricingScreenState extends State<PricingScreen> {
             planName: 'Pro Plan',
             billing: _annual ? 'Billed annually.' : 'Billed monthly.',
             features: const [
-              'Access to all basic features &',
+              'Access to all basic features',
               'Unlimited connection requests',
-              'Invitation note to 5 individual users',
-              'Priority chat and email support',
+              'Invitation notes to individual users',
+              'Priority chat & email support',
             ],
             ctaLabel: 'Get Started',
             onCta: () {
+              // Purchase wiring (IAP) is out of scope this phase (§11.3).
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Pro Plan checkout (mock)'),
+                  content: Text('Purchases are coming soon.'),
                 ),
               );
             },
@@ -130,7 +131,7 @@ class _PricingScreenState extends State<PricingScreen> {
             onCta: () {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Starter Plan checkout (mock)'),
+                  content: Text('Purchases are coming soon.'),
                 ),
               );
             },

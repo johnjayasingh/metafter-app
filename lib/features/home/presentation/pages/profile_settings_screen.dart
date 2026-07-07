@@ -1,12 +1,20 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
+import '../../../../core/domain/models.dart';
+import '../../../../core/repositories/repositories.dart';
+import '../../../../core/services/app_services.dart';
 import '../../../../core/theme/app_colors.dart';
+import 'nearby_person_profile_screen.dart';
 import 'pricing_screen.dart';
 import 'privacy_security_screen.dart';
 
-/// User's own profile + settings home.
+/// User's own profile + settings home (DESIGN_SPEC §11.1).
 ///
-/// Reached from the gear icon on the centre avatar in [DiscoveryHomeScreen].
+/// Every row is wired to [SettingsRepository] via [AppServices.I.settings] —
+/// the same ValueListenables drive the Home shell, so changes here are live
+/// everywhere.
 class ProfileSettingsScreen extends StatefulWidget {
   const ProfileSettingsScreen({super.key});
 
@@ -15,18 +23,8 @@ class ProfileSettingsScreen extends StatefulWidget {
 }
 
 class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
-  String _mood = 'Networking';
-  String _language = 'English';
-  String _accessibility = 'Back Tap';
-  String _discoverableTime = '4 hrs';
-  String _proximityDistance = '2 mts';
+  SettingsRepository get _settings => AppServices.I.settings;
 
-  static const _moodOptions = <({String label, Color color})>[
-    (label: 'Networking', color: AppColors.brandRed),
-    (label: 'Social', color: Color(0xFFF59E0B)),
-    (label: 'Dating', color: Color(0xFFEC4899)),
-    (label: 'Do not disturb', color: Color(0xFF6B7280)),
-  ];
   static const _languageOptions = <String>[
     'English',
     'Spanish',
@@ -34,17 +32,29 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     'German',
     'Japanese',
   ];
-  static const _accessibilityOptions = <String>[
-    'Back Tap',
-    'Voice Over',
-    'Larger Text',
-    'High Contrast',
-  ];
-  static const _timeOptions = <String>['1 hr', '2 hrs', '4 hrs', '8 hrs'];
-  static const _distanceOptions = <String>['1 mt', '2 mts', '5 mts', '10 mts'];
+  static const _timeFormatOptions = <String>['12hr', '24hr'];
 
-  Future<String?> _pickFromList(String title, List<String> options,
-      String current) async {
+  // DESIGN_SPEC §11.1: 30 min / 1 hr / 2 hrs / 4 hrs / 8 hrs.
+  static const _durationOptions = <Duration>[
+    Duration(minutes: 30),
+    Duration(hours: 1),
+    Duration(hours: 2),
+    Duration(hours: 4),
+    Duration(hours: 8),
+  ];
+
+  // DESIGN_SPEC §11.1: 2 / 5 / 10 mts.
+  static const _distanceOptions = <double>[2, 5, 10];
+
+  static String _durationLabel(Duration d) {
+    if (d.inMinutes < 60) return '${d.inMinutes} min';
+    return d.inHours == 1 ? '1 hr' : '${d.inHours} hrs';
+  }
+
+  static String _distanceLabel(double meters) => '${meters.round()} mts';
+
+  Future<String?> _pickFromList(
+      String title, List<String> options, String current) async {
     return showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.white,
@@ -60,7 +70,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   }
 
   Future<void> _pickMood() async {
-    final picked = await showModalBottomSheet<String>(
+    final picked = await showModalBottomSheet<MoodRing>(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
@@ -72,16 +82,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const SizedBox(height: 12),
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE0E0E0),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
+            const _SheetHandle(),
             const Padding(
               padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Text('Set Mood Ring',
@@ -90,7 +91,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                     fontWeight: FontWeight.w800,
                   )),
             ),
-            for (final m in _moodOptions)
+            for (final m in MoodRing.values)
               ListTile(
                 leading: Container(
                   width: 16,
@@ -101,26 +102,71 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                   ),
                 ),
                 title: Text(m.label),
-                trailing: m.label == _mood
+                trailing: m == _settings.mood.value
                     ? const Icon(Icons.check_rounded,
                         color: AppColors.brandRed)
                     : null,
-                onTap: () => Navigator.of(ctx).pop(m.label),
+                onTap: () => Navigator.of(ctx).pop(m),
               ),
             const SizedBox(height: 8),
           ],
         ),
       ),
     );
-    if (picked != null) setState(() => _mood = picked);
+    if (picked != null) await _settings.setMood(picked);
   }
 
-  Color get _moodColor =>
-      _moodOptions.firstWhere((m) => m.label == _mood).color;
+  void _openAccessibility() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 12),
+            const _SheetHandle(),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Text('Accessibility',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  )),
+            ),
+            ValueListenableBuilder<bool>(
+              valueListenable: _settings.reduceMotion,
+              builder: (_, v, _) => SwitchListTile(
+                title: const Text('Reduce Motion'),
+                subtitle: const Text('Disable looping and idle animations'),
+                value: v,
+                activeTrackColor: AppColors.brandRed,
+                onChanged: _settings.setReduceMotion,
+              ),
+            ),
+            ValueListenableBuilder<bool>(
+              valueListenable: _settings.largerText,
+              builder: (_, v, _) => SwitchListTile(
+                title: const Text('Larger Text'),
+                value: v,
+                activeTrackColor: AppColors.brandRed,
+                onChanged: _settings.setLargerText,
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
 
   void _shareProfile() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Sharing profile (mock)')),
+      const SnackBar(content: Text('Profile sharing is coming soon.')),
     );
   }
 
@@ -132,10 +178,20 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     );
   }
 
-  void _seeProfile() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Open public profile (mock)')),
-    );
+  Future<void> _seeProfile() async {
+    try {
+      // Self-preview: exactly the card peers see over BLE.
+      final card = await AppServices.I.profile.buildCard();
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => NearbyPersonProfileScreen(card: card),
+      ));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Complete your profile to preview it.')),
+      );
+    }
   }
 
   @override
@@ -161,38 +217,41 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
-          _ProfileHeader(
-            name: 'Luna Ray',
-            title: 'VP, Sales',
-            company: 'SaleSail',
-            photoUrl: 'https://i.pravatar.cc/300?img=47',
-            onSeeProfile: _seeProfile,
+          ValueListenableBuilder<MyProfile?>(
+            valueListenable: AppServices.I.profile.profile,
+            builder: (_, profile, _) => _ProfileHeader(
+              profile: profile,
+              onSeeProfile: _seeProfile,
+            ),
           ),
           const SizedBox(height: 18),
           _RowGroup(rows: [
-            _ChevronRow(
-              label: 'Set Mood Ring',
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 16,
-                    height: 16,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: _moodColor, width: 2),
+            ValueListenableBuilder<MoodRing>(
+              valueListenable: _settings.mood,
+              builder: (_, mood, _) => _ChevronRow(
+                label: 'Set Mood Ring',
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 16,
+                      height: 16,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: mood.color, width: 2),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(_mood,
-                      style: const TextStyle(
-                          fontSize: 14, color: Color(0xFF8A8A8A))),
-                  const SizedBox(width: 6),
-                  const Icon(Icons.chevron_right_rounded,
-                      color: Color(0xFFB0B0B0), size: 22),
-                ],
+                    const SizedBox(width: 8),
+                    Text(mood.label,
+                        style: const TextStyle(
+                            fontSize: 14, color: Color(0xFF8A8A8A))),
+                    const SizedBox(width: 6),
+                    const Icon(Icons.chevron_right_rounded,
+                        color: Color(0xFFB0B0B0), size: 22),
+                  ],
+                ),
+                onTap: _pickMood,
               ),
-              onTap: _pickMood,
             ),
           ]),
           const SizedBox(height: 12),
@@ -206,23 +265,33 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           ]),
           const SizedBox(height: 12),
           _RowGroup(rows: [
-            _ChevronRow(
-              label: 'Language',
-              trailingText: _language,
-              onTap: () async {
-                final v = await _pickFromList(
-                    'Language', _languageOptions, _language);
-                if (v != null) setState(() => _language = v);
-              },
+            ValueListenableBuilder<String>(
+              valueListenable: _settings.language,
+              builder: (_, language, _) => _ChevronRow(
+                label: 'Language',
+                trailingText: language,
+                onTap: () async {
+                  final v = await _pickFromList(
+                      'Language', _languageOptions, language);
+                  if (v != null) await _settings.setLanguage(v);
+                },
+              ),
+            ),
+            ValueListenableBuilder<bool>(
+              valueListenable: _settings.use24hTime,
+              builder: (_, use24h, _) => _ChevronRow(
+                label: 'Time Format',
+                trailingText: use24h ? '24hr' : '12hr',
+                onTap: () async {
+                  final v = await _pickFromList('Time Format',
+                      _timeFormatOptions, use24h ? '24hr' : '12hr');
+                  if (v != null) await _settings.setUse24hTime(v == '24hr');
+                },
+              ),
             ),
             _ChevronRow(
               label: 'Accessibility',
-              trailingText: _accessibility,
-              onTap: () async {
-                final v = await _pickFromList('Accessibility',
-                    _accessibilityOptions, _accessibility);
-                if (v != null) setState(() => _accessibility = v);
-              },
+              onTap: _openAccessibility,
             ),
             _ChevronRow(
               label: 'Privacy & Security',
@@ -235,23 +304,41 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           ]),
           const SizedBox(height: 12),
           _RowGroup(rows: [
-            _ChevronRow(
-              label: 'Discoverable Time',
-              trailingText: _discoverableTime,
-              onTap: () async {
-                final v = await _pickFromList('Discoverable Time',
-                    _timeOptions, _discoverableTime);
-                if (v != null) setState(() => _discoverableTime = v);
-              },
+            ValueListenableBuilder<Duration>(
+              valueListenable: _settings.discoverableDuration,
+              builder: (_, duration, _) => _ChevronRow(
+                label: 'Discoverable Time',
+                trailingText: _durationLabel(duration),
+                onTap: () async {
+                  final v = await _pickFromList(
+                    'Discoverable Time',
+                    _durationOptions.map(_durationLabel).toList(),
+                    _durationLabel(duration),
+                  );
+                  if (v == null) return;
+                  final picked = _durationOptions
+                      .firstWhere((d) => _durationLabel(d) == v);
+                  await _settings.setDiscoverableDuration(picked);
+                },
+              ),
             ),
-            _ChevronRow(
-              label: 'Proximity Distance',
-              trailingText: _proximityDistance,
-              onTap: () async {
-                final v = await _pickFromList('Proximity Distance',
-                    _distanceOptions, _proximityDistance);
-                if (v != null) setState(() => _proximityDistance = v);
-              },
+            ValueListenableBuilder<double>(
+              valueListenable: _settings.distanceBudget,
+              builder: (_, distance, _) => _ChevronRow(
+                label: 'Proximity Distance',
+                trailingText: _distanceLabel(distance),
+                onTap: () async {
+                  final v = await _pickFromList(
+                    'Proximity Distance',
+                    _distanceOptions.map(_distanceLabel).toList(),
+                    _distanceLabel(distance),
+                  );
+                  if (v == null) return;
+                  final picked = _distanceOptions
+                      .firstWhere((d) => _distanceLabel(d) == v);
+                  await _settings.setDistanceBudget(picked);
+                },
+              ),
             ),
           ]),
           const SizedBox(height: 18),
@@ -266,20 +353,26 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
 
 class _ProfileHeader extends StatelessWidget {
   const _ProfileHeader({
-    required this.name,
-    required this.title,
-    required this.company,
-    required this.photoUrl,
+    required this.profile,
     required this.onSeeProfile,
   });
-  final String name;
-  final String title;
-  final String company;
-  final String photoUrl;
+  final MyProfile? profile;
   final VoidCallback onSeeProfile;
+
+  String get _initials {
+    final name = profile?.name.trim() ?? '';
+    final parts = name.split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return '?';
+    return parts.take(2).map((p) => p[0].toUpperCase()).join();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final photoPath = profile?.photoPath;
+    final hasPhoto = photoPath != null &&
+        photoPath.isNotEmpty &&
+        File(photoPath).existsSync();
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
@@ -291,17 +384,15 @@ class _ProfileHeader extends StatelessWidget {
               border: Border.all(color: AppColors.brandRed, width: 2.5),
             ),
             child: ClipOval(
-              child: Image.network(
-                photoUrl,
-                width: 64,
-                height: 64,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  width: 64,
-                  height: 64,
-                  color: const Color(0xFFE3C8B5),
-                ),
-              ),
+              child: hasPhoto
+                  ? Image.file(
+                      File(photoPath),
+                      width: 64,
+                      height: 64,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => _initialsDisc(),
+                    )
+                  : _initialsDisc(),
             ),
           ),
           const SizedBox(width: 14),
@@ -309,14 +400,14 @@ class _ProfileHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name,
+                Text(profile?.name ?? 'Your Name',
                     style: const TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w800,
                       color: Colors.black,
                     )),
                 const SizedBox(height: 2),
-                Text('$title - $company',
+                Text(profile?.titleLine ?? '',
                     style: const TextStyle(
                       fontSize: 13,
                       color: Color(0xFF6B6B6B),
@@ -348,6 +439,21 @@ class _ProfileHeader extends StatelessWidget {
       ),
     );
   }
+
+  Widget _initialsDisc() => Container(
+        width: 64,
+        height: 64,
+        color: AppColors.brandRed.withValues(alpha: 0.12),
+        alignment: Alignment.center,
+        child: Text(
+          _initials,
+          style: const TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: AppColors.brandRed,
+          ),
+        ),
+      );
 }
 
 // ─── Get Pro CTA ──────────────────────────────────────────────────────────────
@@ -439,10 +545,10 @@ class _UpgradeProDialog extends StatelessWidget {
                         fontSize: 14, color: Color(0xFF6B6B6B))),
                 const SizedBox(height: 18),
                 ...const [
-                  'Access to all basic features &',
+                  'Access to all basic features',
                   'Unlimited connection requests',
-                  'Invitation note to 5 individual users',
-                  'Priority chat and email support',
+                  'Invitation notes to individual users',
+                  'Priority chat & email support',
                 ].map((f) => Padding(
                       padding: const EdgeInsets.symmetric(vertical: 6),
                       child: Row(
@@ -476,7 +582,7 @@ class _UpgradeProDialog extends StatelessWidget {
                       Navigator.of(context).pop();
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                            content: Text('Pro Plan checkout (mock)')),
+                            content: Text('Purchases are coming soon.')),
                       );
                     },
                     style: FilledButton.styleFrom(
@@ -520,6 +626,24 @@ class _UpgradeProDialog extends StatelessWidget {
 
 // ─── Generic picker sheet ─────────────────────────────────────────────────────
 
+class _SheetHandle extends StatelessWidget {
+  const _SheetHandle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 40,
+        height: 4,
+        decoration: BoxDecoration(
+          color: const Color(0xFFE0E0E0),
+          borderRadius: BorderRadius.circular(2),
+        ),
+      ),
+    );
+  }
+}
+
 class _PickerSheet extends StatelessWidget {
   const _PickerSheet({
     required this.title,
@@ -533,39 +657,33 @@ class _PickerSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SizedBox(height: 12),
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE0E0E0),
-                borderRadius: BorderRadius.circular(2),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 12),
+            const _SheetHandle(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Text(title,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  )),
+            ),
+            for (final o in options)
+              ListTile(
+                title: Text(o),
+                trailing: o == current
+                    ? const Icon(Icons.check_rounded,
+                        color: AppColors.brandRed)
+                    : null,
+                onTap: () => Navigator.of(context).pop(o),
               ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-            child: Text(title,
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                )),
-          ),
-          for (final o in options)
-            ListTile(
-              title: Text(o),
-              trailing: o == current
-                  ? const Icon(Icons.check_rounded, color: AppColors.brandRed)
-                  : null,
-              onTap: () => Navigator.of(context).pop(o),
-            ),
-          const SizedBox(height: 8),
-        ],
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }

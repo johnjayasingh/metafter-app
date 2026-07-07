@@ -5,19 +5,22 @@ import '../config/environment_config.dart';
 import '../network/profile_api.dart';
 import 'face_liveness_channel.dart';
 
-/// Orchestrates signup identity verification:
-///   upload profile photo → open liveness session → run native liveness UI
-///   → (later) resolve the server-side verdict.
+/// Orchestrates signup identity verification against the stateless backend
+/// (`/v1/verification/*`):
+///   start (liveness session + presigned photo PUT) → upload reference photo
+///   → run native liveness UI → resolve via `complete(sessionId, photoKey)`.
 class FaceVerificationService {
   FaceVerificationService._();
   static final FaceVerificationService instance = FaceVerificationService._();
 
-  final ProfileApi _profile = ProfileApi();
+  final VerificationApi _api = VerificationApi();
 
-  /// Ensures the profile photo is uploaded, opens a Rekognition liveness
-  /// session, and presents the native liveness UI. Returns the session id to
-  /// later [resolve]. Throws [FaceLivenessException] if liveness can't run.
-  Future<String> startLiveness({String? photoPath}) async {
+  /// Opens a verification attempt, uploads the reference photo to the
+  /// presigned URL, and presents the native liveness UI. Returns the session
+  /// (id + photoKey) to later [resolve]. Throws [FaceLivenessException] if
+  /// liveness can't run (unavailable devices stay skippable — callers catch
+  /// `isUnavailable`).
+  Future<VerificationSession> startLiveness({String? photoPath}) async {
     final creds = await CognitoAuthService.instance.awsCredentials();
     if (creds == null) {
       throw FaceLivenessException(
@@ -26,25 +29,30 @@ class FaceVerificationService {
       );
     }
 
-    // The backend matches the live frame against the stored profile photo, so
-    // make sure it's uploaded before the session is verified.
+    final session = await _api.start();
+
+    // The backend matches the live frame against this reference photo, so it
+    // must be uploaded before the session is completed. It lives only under
+    // a tmp/ key and is deleted server-side after the comparison.
     if (photoPath != null && photoPath.isNotEmpty) {
-      await _profile.uploadPhoto(File(photoPath));
+      await _api.uploadPhoto(File(photoPath), session.photoUploadUrl);
     }
 
-    final sessionId = await _profile.createLivenessSession();
     await FaceLivenessChannel.start(
-      sessionId: sessionId,
+      sessionId: session.sessionId,
       region: EnvironmentConfig.region,
       accessKeyId: creds.accessKeyId,
       secretAccessKey: creds.secretAccessKey,
       sessionToken: creds.sessionToken,
     );
-    return sessionId;
+    return session;
   }
 
-  /// Resolves the server-side verdict for a completed liveness [sessionId].
-  Future<IdentityVerificationResult> resolve(String sessionId) {
-    return _profile.verifyIdentity(sessionId);
+  /// Resolves the server-side verdict for a completed liveness session.
+  Future<IdentityVerificationResult> resolve(
+    String sessionId,
+    String photoKey,
+  ) {
+    return _api.complete(sessionId, photoKey);
   }
 }

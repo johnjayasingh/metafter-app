@@ -147,7 +147,7 @@ class AppDropdownFormField<T> extends StatelessWidget {
     final safeValue = (value != null && items.contains(value)) ? value : null;
 
     return DropdownButtonFormField<T>(
-      value: safeValue,
+      initialValue: safeValue,
       isExpanded: true,
       decoration: InputDecoration(
         labelText: isRequired ? '$label *' : label,

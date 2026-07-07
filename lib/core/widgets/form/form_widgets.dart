@@ -6,7 +6,7 @@
 /// ```dart
 /// import 'package:metafter/core/widgets/form/form_widgets.dart';
 /// ```
-library form_widgets;
+library;
 
 export 'app_text_field.dart';
 export 'app_dropdown.dart';

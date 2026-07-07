@@ -15,10 +15,11 @@ class SignupProfileScreen extends StatefulWidget {
 }
 
 class _SignupProfileScreenState extends State<SignupProfileScreen> {
+  // DESIGN_SPEC §3.5 role options.
   static const _roles = <String>[
     'Working Professional',
     'Student',
-    'Entrepreneur',
+    'Founder',
     'Freelancer',
     'Other',
   ];
@@ -37,7 +38,8 @@ class _SignupProfileScreenState extends State<SignupProfileScreen> {
     _designation = TextEditingController(text: _draft.designation);
     _company = TextEditingController(text: _draft.company);
     _intro = TextEditingController(text: _draft.introduction);
-    _role = _draft.role.isNotEmpty ? _draft.role : _roles.first;
+    // Guard against drafts persisted with a role no longer in the list.
+    _role = _roles.contains(_draft.role) ? _draft.role : _roles.first;
   }
 
   @override

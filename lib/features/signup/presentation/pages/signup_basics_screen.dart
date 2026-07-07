@@ -19,6 +19,7 @@ class SignupBasicsScreen extends StatefulWidget {
 
 class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
   final _name = TextEditingController();
+  final _email = TextEditingController();
   final _phone = TextEditingController();
 
   final _draft = SignupDraft.instance;
@@ -37,6 +38,7 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
   void initState() {
     super.initState();
     _name.text = _draft.name;
+    _email.text = _draft.email;
     _phone.text = _draft.phone;
     if (_draft.countryCode.isNotEmpty) {
       _dialCode = _draft.countryCode;
@@ -51,11 +53,17 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
   @override
   void dispose() {
     _name.dispose();
+    _email.dispose();
     _phone.dispose();
     super.dispose();
   }
 
   String? get _nameError => SignupValidators.fullName(_name.text);
+
+  /// Email is optional — only phone auth exists today, so the phone is the
+  /// verification channel. A non-empty email must still be well-formed.
+  String? get _emailError =>
+      SignupValidators.email(_email.text, required: false);
 
   String? get _phoneError {
     if (_phone.text.trim().isEmpty) return 'Phone number is required';
@@ -63,7 +71,8 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
     return null;
   }
 
-  bool get _isValid => _nameError == null && _phoneError == null;
+  bool get _isValid =>
+      _nameError == null && _emailError == null && _phoneError == null;
 
   Future<void> _onNext() async {
     if (!_isValid || _submitting) {
@@ -72,6 +81,7 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
     }
     _draft.update(() {
       _draft.name = _name.text.trim();
+      _draft.email = _email.text.trim();
       _draft.phone = _phone.text.trim();
       _draft.countryCode = _dialCode;
     });
@@ -115,6 +125,17 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 22),
+          MetafterField(
+            label: 'Email ID (optional)',
+            controller: _email,
+            hint: 'lunaray@gmail.com',
+            keyboardType: TextInputType.emailAddress,
+            errorText: _showErrors ? _emailError : null,
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 18),
+          const _OrDivider(),
+          const SizedBox(height: 18),
           MetafterPhoneField(
             controller: _phone,
             initialCountryCode: _isoCode,
@@ -146,5 +167,31 @@ class _SignupBasicsScreenState extends State<SignupBasicsScreen> {
     } catch (_) {
       return false;
     }
+  }
+}
+
+/// Centered "or" divider between the email and phone fields (§3.3).
+class _OrDivider extends StatelessWidget {
+  const _OrDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Row(
+      children: [
+        Expanded(child: Divider(color: Color(0xFFE0E0E0), height: 1)),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 12),
+          child: Text(
+            'or',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF8E8E93),
+            ),
+          ),
+        ),
+        Expanded(child: Divider(color: Color(0xFFE0E0E0), height: 1)),
+      ],
+    );
   }
 }

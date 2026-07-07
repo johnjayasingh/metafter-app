@@ -5,6 +5,7 @@ import 'core/config/environment_config.dart';
 import 'core/data/mock_data.dart';
 import 'core/network/api_client.dart';
 import 'core/routes/app_router.dart';
+import 'core/services/bootstrap_services.dart';
 import 'core/theme/app_theme.dart';
 import 'features/signup/data/signup_draft.dart';
 
@@ -37,6 +38,14 @@ Future<void> bootstrap({
   // Restore any previously-persisted signup draft (keeps the user signed
   // in across launches).
   await SignupDraft.instance.load();
+
+  // Build the local-first service graph (crypto keys, SQLite repositories,
+  // proximity engine, relay transport) and install it as AppServices.I.
+  // Local/dev flavors run against the simulated proximity engine so the
+  // whole app is drivable on emulators/simulators without BLE hardware.
+  await initAppServices(
+    simulated: EnvironmentConfig.isLocal || EnvironmentConfig.isDev,
+  );
 
   // Prefill the signup draft with mock data in debug builds so we can
   // tab through the multi-step signup flow without retyping everything.

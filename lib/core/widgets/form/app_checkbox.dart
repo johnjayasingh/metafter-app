@@ -134,7 +134,7 @@ class AppCheckboxCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: backgroundColor ?? AppColors.backgroundLightGreen.withOpacity(0.3),
+          color: backgroundColor ?? AppColors.backgroundLightGreen.withValues(alpha: 0.3),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: value ? AppColors.primaryGreen : AppColors.borderLight,

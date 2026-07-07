@@ -279,7 +279,7 @@ class AppRadioCard extends StatelessWidget {
               height: 48,
               decoration: BoxDecoration(
                 color: isSelected 
-                    ? AppColors.primaryGreen.withOpacity(0.1) 
+                    ? AppColors.primaryGreen.withValues(alpha: 0.1) 
                     : AppColors.backgroundGray,
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -396,7 +396,7 @@ class _AppRadioButton extends StatelessWidget {
         boxShadow: !isSelected
             ? [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   offset: const Offset(0, 1),
                   blurRadius: 2,
                 ),

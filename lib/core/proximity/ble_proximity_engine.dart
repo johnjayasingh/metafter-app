@@ -8,7 +8,6 @@ import 'package:bluetooth_low_energy/bluetooth_low_energy.dart' as ble;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'package:permission_handler/permission_handler.dart';
 
-import '../crypto/crypto_service.dart';
 import '../domain/models.dart';
 import 'direction_estimator.dart';
 import 'distance_estimator.dart';
@@ -17,16 +16,26 @@ import 'proximity_engine.dart';
 /// Real-BLE [ProximityEngine] (ARCHITECTURE.md §2).
 ///
 /// Dual role:
-///  * **Peripheral** (`bluetooth_low_energy`): advertises the MetAfter
-///    service with `EID ‖ flags ‖ mood ‖ txPower` service data (EID rotates
-///    every 15 min) and runs the GATT server (ProfileCard read + the three
-///    write characteristics). Skipped entirely in incognito mode, and
+///  * **Peripheral** (`bluetooth_low_energy`): advertises *only* the MetAfter
+///    service UUID — no service data, manufacturer data or local name — and
+///    runs the GATT server (ProfileCard read + the three write
+///    characteristics). Service-UUID-only is the single advertisement shape
+///    that succeeds on both CoreBluetooth (iOS) and Android's 31-byte legacy
+///    packet, so every MetAfter device looks identical over the air (strictly
+///    more private than a rotating-EID payload). Skipped in incognito mode and
 ///    degraded to scan-only when the platform lacks peripheral support
 ///    (e.g. iOS simulator).
 ///  * **Central** (`flutter_blue_plus`): scans filtered by the service UUID,
-///    estimates distance from RSSI + advertised TX power ([DistanceEstimator]),
-///    reads peer profile cards on first sighting (≤2 concurrent connects),
-///    and delivers requests/responses/frames as GATT writes.
+///    estimates distance from the scan RSSI using a *fixed* assumed 1 m TX
+///    power ([txPowerAt1m]) — TX power is no longer advertised — and reads
+///    peer profile cards over GATT on first sighting (≤2 concurrent connects),
+///    then delivers requests/responses/frames as chunked GATT writes.
+///
+/// Identity and mood are *not* carried in the advertisement: a peer is
+/// anonymous until its ProfileCard is read over GATT. Mood-over-BLE is not
+/// implemented this phase — [NearbyPeer.mood] stays [MoodRing.networking].
+/// [CryptoService.currentEid] is left in place but is now unused by the BLE
+/// layer.
 ///
 /// Every platform call is guarded — BLE stacks fail in creative ways and the
 /// engine must never take the app down with it.
@@ -35,11 +44,11 @@ class BleProximityEngine implements ProximityEngine {
 
   // -- UUIDs (ARCHITECTURE.md §2.2/§2.3) ----------------------------------
 
-  /// "META…" service UUID carried in the advertisement.
+  /// "META…" service UUID — the only thing carried in the advertisement.
   static const serviceUuid = '4D455441-0001-4653-5445-524D45544146';
 
-  /// ProfileCard — read (chunked); also accepts a 1-byte chunk-index write
-  /// (see [_chunkSize] protocol below).
+  /// ProfileCard — read (length-prefixed, chunked); also accepts a 1-byte
+  /// chunk-index write (see [_chunkSize] protocol below).
   static const profileCardUuid = '4D455441-0002-4653-5445-524D45544146';
 
   /// ConnectRequest — write, JSON [ConnectRequestPayload].
@@ -51,17 +60,22 @@ class BleProximityEngine implements ProximityEngine {
   /// Frame — write, JSON `{senderSub, frame: base64}`.
   static const frameUuid = '4D455441-0005-4653-5445-524D45544146';
 
-  /// Calibrated TX power at 1 m advertised in byte 10 of the service data.
+  /// Assumed calibrated RSSI at 1 m used to turn scan RSSI into meters. Because
+  /// TX power is no longer advertised (service-UUID-only), this is a fixed
+  /// reference rather than a per-device value: real TX power varies by ±6 dB,
+  /// so absolute distance is coarser, but the estimate is still smoothed by the
+  /// per-peer EMA and only used to gate the distance budget.
   static const int txPowerAt1m = -59;
 
-  /// Chunk size of the explicit chunked-read fallback protocol: the central
+  /// Chunk size of the length-prefixed chunked read/serve protocol: the central
   /// writes a single byte `i` to the ProfileCard characteristic and the next
-  /// read is served from offset `i * _chunkSize`. Used when the platform's
-  /// own long-read (offset) mechanism doesn't deliver the full card.
+  /// read is served from offset `i * _chunkSize` of the length-prefixed value.
   static const int _chunkSize = 180;
 
+  /// Absolute ceiling for a single GATT write chunk (BLE spec attribute max).
+  static const int _maxWriteChunk = 512;
+
   static const _peerTtl = Duration(seconds: 10);
-  static const _eidRotation = Duration(minutes: 15);
   static const int _maxConcurrentCardReads = 2;
 
   // -- state ---------------------------------------------------------------
@@ -78,13 +92,14 @@ class BleProximityEngine implements ProximityEngine {
   bool _peripheralAvailable = false;
   ble.GATTService? _gattService;
 
-  /// Peers keyed by advertised EID.
+  /// Peers keyed by the scan result's device remote id.
   final Map<String, _BlePeer> _peers = {};
 
-  /// sub → EID of the device that presented that card (routing for send*).
+  /// sub → device remote id of the device that presented that card (routing
+  /// for send*).
   final Map<String, String> _subToEid = {};
 
-  /// Cards cached across EID rotations within the engine lifetime.
+  /// Cards cached per device remote id within the engine lifetime.
   final Map<String, ProfileCard> _cardByEid = {};
 
   int _cardReadsInFlight = 0;
@@ -94,7 +109,7 @@ class BleProximityEngine implements ProximityEngine {
   /// `centralUuid:charUuid`.
   final Map<String, _WriteBuffer> _writeBuffers = {};
 
-  /// Chunked-read fallback: chunk index per central for ProfileCard reads.
+  /// Chunked-read protocol: chunk index per central for ProfileCard reads.
   final Map<String, int> _readChunkIndex = {};
 
   final Set<Timer> _timers = {};
@@ -121,6 +136,10 @@ class BleProximityEngine implements ProximityEngine {
     _config = config;
     _running = true;
     final gen = ++_generation;
+    // Fresh generation: clear the concurrency budget so any card read still
+    // draining from a previous session (whose whenComplete decrement is now
+    // generation-gated) can't corrupt this session's counter.
+    _cardReadsInFlight = 0;
 
     final ready = await _ensureBluetoothReady();
     if (!ready || !_running || gen != _generation) {
@@ -169,17 +188,25 @@ class BleProximityEngine implements ProximityEngine {
     _writeBuffers.clear();
     _readChunkIndex.clear();
     _cardReadQueue.clear();
-    _cardReadsInFlight = 0;
+    // NOTE: do not reset _cardReadsInFlight here — reads still in flight will
+    // run their (generation-gated) whenComplete after this returns. The
+    // counter is instead reset at the start of the next session.
     if (!_nearbyCtrl.isClosed) _nearbyCtrl.add(const []);
   }
 
   @override
-  Future<bool> sendRequest(String peerSub, ConnectRequestPayload payload) =>
-      _writeJsonTo(peerSub, connectRequestUuid, payload.toJson());
+  Future<bool> sendRequest(String peerSub, ConnectRequestPayload payload) {
+    final json = payload.toJson();
+    _stripCardPhoto(json);
+    return _writeJsonTo(peerSub, connectRequestUuid, json);
+  }
 
   @override
-  Future<bool> sendResponse(String peerSub, ConnectResponsePayload payload) =>
-      _writeJsonTo(peerSub, connectResponseUuid, payload.toJson());
+  Future<bool> sendResponse(String peerSub, ConnectResponsePayload payload) {
+    final json = payload.toJson();
+    _stripCardPhoto(json);
+    return _writeJsonTo(peerSub, connectResponseUuid, json);
+  }
 
   @override
   Future<bool> sendFrame(String peerSub, Uint8List frame) =>
@@ -257,21 +284,30 @@ class BleProximityEngine implements ProximityEngine {
         // user may decline; the adapter check below will surface that.
       }
 
-      try {
-        final state = await fbp.FlutterBluePlus.adapterState
-            .where((s) => s == fbp.BluetoothAdapterState.on)
-            .first
-            .timeout(const Duration(seconds: 4),
-                onTimeout: () => fbp.BluetoothAdapterState.unknown);
-        return state == fbp.BluetoothAdapterState.on;
-      } catch (_) {
-        return false;
-      }
+      return _waitForAdapterOn();
     }
 
-    // iOS/macOS: permission prompts are raised by the system on first BLE
-    // use (NSBluetoothAlwaysUsageDescription is in Info.plist).
-    return true;
+    // iOS/macOS: CBCentralManager is created lazily on the first fbp call and
+    // reports .unknown for a short window — and until the first-run Bluetooth
+    // permission dialog is answered. fbp's darwin startScan hard-errors unless
+    // the adapter is poweredOn, so wait for it here (bounded) exactly like the
+    // Android branch, otherwise a cold start / permission-prompt race leaves
+    // scanning silently dead for the whole session.
+    return _waitForAdapterOn();
+  }
+
+  /// Waits (bounded) for the fbp adapter to report [fbp.BluetoothAdapterState.on].
+  Future<bool> _waitForAdapterOn() async {
+    try {
+      final state = await fbp.FlutterBluePlus.adapterState
+          .where((s) => s == fbp.BluetoothAdapterState.on)
+          .first
+          .timeout(const Duration(seconds: 6),
+              onTimeout: () => fbp.BluetoothAdapterState.unknown);
+      return state == fbp.BluetoothAdapterState.on;
+    } catch (_) {
+      return false;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -318,11 +354,6 @@ class BleProximityEngine implements ProximityEngine {
       await _advertise(peripheral);
       _peripheralAvailable = true;
 
-      // Rotate the advertised EID every 15 minutes.
-      _periodic(_eidRotation, gen, () {
-        unawaited(_reAdvertise(peripheral));
-      });
-
       // Sweep stale half-assembled writes.
       _periodic(const Duration(seconds: 5), gen, _sweepWriteBuffers);
     } catch (_) {
@@ -368,56 +399,15 @@ class BleProximityEngine implements ProximityEngine {
     );
   }
 
-  Uint8List _buildServiceData() {
-    final data = Uint8List(11);
-    // Bytes 0–7: rotating EID.
-    var eidHex = '';
-    try {
-      eidHex = CryptoService.instance.currentEid();
-    } catch (_) {
-      // Keys not initialized (should not happen post-signup) — zero EID.
-    }
-    for (var i = 0; i < 8; i++) {
-      data[i] = eidHex.length >= (i + 1) * 2
-          ? int.parse(eidHex.substring(i * 2, i * 2 + 2), radix: 16)
-          : 0;
-    }
-    // Byte 8: flags — bit0 discoverable, bit1 verified, bit2 pro.
-    final card = _config?.myCard;
-    data[8] = 0x01 |
-        ((card?.verified ?? false) ? 0x02 : 0x00); // pro bit unset this phase
-    // Byte 9: mood ring.
-    data[9] = (_config?.mood ?? MoodRing.networking).wire;
-    // Byte 10: calibrated TX power at 1 m (signed).
-    data[10] = txPowerAt1m & 0xff;
-    return data;
-  }
-
+  /// Advertises the service UUID only. This is the one advertisement shape that
+  /// succeeds on both CoreBluetooth and Android's 31-byte legacy packet; no
+  /// service data / manufacturer data / local name is included (a local name
+  /// on Android would persistently rename the system Bluetooth adapter).
   Future<void> _advertise(ble.PeripheralManager peripheral) async {
     final svc = ble.UUID.fromString(serviceUuid);
-    try {
-      await peripheral.startAdvertising(ble.Advertisement(
-        serviceUUIDs: [svc],
-        serviceData: {svc: _buildServiceData()},
-      ));
-    } catch (_) {
-      // Service data in the advertisement is Android-only; iOS peers are
-      // still discoverable by service UUID (EID/flags then arrive with the
-      // profile card instead of the advertisement).
-      await peripheral.startAdvertising(ble.Advertisement(
-        name: 'MetAfter',
-        serviceUUIDs: [svc],
-      ));
-    }
-  }
-
-  Future<void> _reAdvertise(ble.PeripheralManager peripheral) async {
-    try {
-      await peripheral.stopAdvertising();
-    } catch (_) {}
-    try {
-      await _advertise(peripheral);
-    } catch (_) {}
+    await peripheral.startAdvertising(ble.Advertisement(
+      serviceUUIDs: [svc],
+    ));
   }
 
   void _onCharacteristicRead(ble.GATTCharacteristicReadRequestedEventArgs e) {
@@ -432,13 +422,12 @@ class BleProximityEngine implements ProximityEngine {
           );
           return;
         }
-        final bytes =
-            utf8.encode(_config?.myCard.encode() ?? '{}');
-        final base = (_readChunkIndex[e.central.uuid.toString()] ?? 0) *
-            _chunkSize;
+        final bytes = _servedCardBytes();
+        final base =
+            (_readChunkIndex[e.central.uuid.toString()] ?? 0) * _chunkSize;
         final start = math.min(base + e.request.offset, bytes.length);
-        // Serve at most one fallback chunk per read; platform long reads
-        // walk the value with increasing offsets from the same base.
+        // Serve at most one fallback chunk per read; platform long reads walk
+        // the value with increasing offsets from the same base.
         final end = math.min(start + _chunkSize, bytes.length);
         await peripheral.respondReadRequestWithValue(
           e.request,
@@ -446,6 +435,25 @@ class BleProximityEngine implements ProximityEngine {
         );
       } catch (_) {}
     }());
+  }
+
+  /// The ProfileCard value served over GATT: a 4-byte big-endian length header
+  /// followed by the JSON card with [ProfileCard.photoBase64] omitted. The
+  /// photo thumbnail is 15–60 KB and must never traverse GATT; BLE-discovered
+  /// peers render initials (acceptable — they are physically present). The
+  /// length prefix lets the reader know the exact size and stop correctly.
+  Uint8List _servedCardBytes() {
+    final card = _config?.myCard;
+    final jsonStr = card == null ? '{}' : _cardJsonWithoutPhoto(card);
+    final payload = utf8.encode(jsonStr);
+    final out = Uint8List(4 + payload.length);
+    final len = payload.length;
+    out[0] = (len >> 24) & 0xff;
+    out[1] = (len >> 16) & 0xff;
+    out[2] = (len >> 8) & 0xff;
+    out[3] = len & 0xff;
+    out.setRange(4, out.length, payload);
+    return out;
   }
 
   void _onCharacteristicWrite(
@@ -457,7 +465,7 @@ class BleProximityEngine implements ProximityEngine {
         final charUuid = e.characteristic.uuid.toString().toUpperCase();
         final centralKey = e.central.uuid.toString();
 
-        // ProfileCard chunk-index write (fallback chunked-read protocol).
+        // ProfileCard chunk-index write (chunked-read protocol).
         if (charUuid == profileCardUuid.toUpperCase()) {
           if (e.request.value.length == 1) {
             _readChunkIndex[centralKey] = e.request.value[0];
@@ -468,12 +476,13 @@ class BleProximityEngine implements ProximityEngine {
 
         final key = '$centralKey:$charUuid';
         final buffer = _writeBuffers.putIfAbsent(key, _WriteBuffer.new);
-        buffer.write(e.request.offset, e.request.value);
+        // Outbound writes are length-prefixed and chunked into mtu-3 pieces
+        // written sequentially, so append in arrival order (offset is 0 for
+        // each application-level chunk).
+        buffer.add(e.request.value);
         await peripheral.respondWriteRequest(e.request);
 
-        // A payload may arrive as one write or as several offset chunks —
-        // try to parse after every write and emit once it goes valid.
-        final json = buffer.tryParseJson();
+        final json = buffer.takeComplete();
         if (json != null) {
           _writeBuffers.remove(key);
           _dispatchInboundWrite(charUuid, json);
@@ -532,53 +541,49 @@ class BleProximityEngine implements ProximityEngine {
   void _onScanResults(int gen, List<fbp.ScanResult> results) {
     if (!_running || gen != _generation) return;
     final budget = _config?.maxMeters ?? 10.0;
+    final svcGuid = fbp.Guid(serviceUuid);
     var changed = false;
 
     for (final r in results) {
-      final parsed = _parseServiceData(r);
-      if (parsed == null) continue;
-      final (eid, flagsByte, moodByte, txPower) = parsed;
-      // Only surface discoverable peers.
-      if (flagsByte & 0x01 == 0) continue;
+      // The scan filter already restricts to our service UUID, but some
+      // Android stacks surface unrelated devices — drop anything that lists
+      // service UUIDs without ours.
+      final advUuids = r.advertisementData.serviceUuids;
+      if (advUuids.isNotEmpty && !advUuids.contains(svcGuid)) continue;
+
+      final id = r.device.remoteId.str;
+      if (id.isEmpty) continue;
 
       final peer = _peers.putIfAbsent(
-        eid,
-        () => _BlePeer(eid: eid, device: r.device, card: _cardByEid[eid]),
+        id,
+        () => _BlePeer(eid: id, device: r.device, card: _cardByEid[id]),
       );
+
+      // fbp re-emits its whole cumulative scan list on every advertisement, so
+      // skip entries whose sighting time hasn't advanced — otherwise a
+      // departed peer's stale result would keep getting its lastSeen refreshed
+      // and its stale RSSI re-fed into the estimator, pinning ghosts forever.
+      if (peer.lastResultAt != null &&
+          !r.timeStamp.isAfter(peer.lastResultAt!)) {
+        continue;
+      }
+      peer.lastResultAt = r.timeStamp;
       peer.device = r.device;
       peer.rssi = r.rssi;
-      peer.mood = MoodRingX.fromWire(moodByte);
-      peer.verified = flagsByte & 0x02 != 0;
-      peer.meters = peer.estimator.update(r.rssi, txPower);
-      peer.lastSeen = DateTime.now();
+      peer.meters = peer.estimator.update(r.rssi, txPowerAt1m);
+      peer.lastSeen = r.timeStamp;
+      if (peer.card != null) peer.verified = peer.card!.verified;
       changed = true;
 
       if (peer.card == null &&
           !peer.cardReadInFlight &&
           peer.cardReadAttempts <= 1 && // initial try + one retry
           peer.meters <= budget) {
-        _enqueueCardRead(eid, gen);
+        _enqueueCardRead(id, gen);
       }
     }
 
     if (changed) _emitNearby();
-  }
-
-  /// Parses `EID(8) ‖ flags ‖ mood ‖ txPower` out of the advertisement's
-  /// service data. Returns null when our service data is absent/short.
-  (String, int, int, int)? _parseServiceData(fbp.ScanResult r) {
-    try {
-      final data = r.advertisementData.serviceData[fbp.Guid(serviceUuid)];
-      if (data == null || data.length < 11) return null;
-      final eid = data
-          .sublist(0, 8)
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join();
-      final tx = data[10] > 127 ? data[10] - 256 : data[10]; // int8
-      return (eid, data[8], data[9], tx);
-    } catch (_) {
-      return null;
-    }
   }
 
   void _sweepExpired() {
@@ -622,9 +627,13 @@ class BleProximityEngine implements ProximityEngine {
       if (peer == null) continue;
       _cardReadsInFlight++;
       unawaited(_readCard(peer, gen).whenComplete(() {
+        // Guard the decrement with the same generation check the rest of the
+        // callback uses: a read that outlived its session must not touch this
+        // session's counter (the counter was reset at session start instead).
+        if (gen != _generation) return;
         _cardReadsInFlight--;
         peer.cardReadInFlight = false;
-        if (_running && gen == _generation) _pumpCardReads(gen);
+        if (_running) _pumpCardReads(gen);
       }));
     }
   }
@@ -642,22 +651,35 @@ class BleProximityEngine implements ProximityEngine {
         await chr.write(const [0], withoutResponse: false);
       } catch (_) {}
 
-      var bytes = <int>[...await chr.read()];
-      var card = _tryDecodeCard(bytes);
+      final buf = <int>[...await chr.read()];
+      int? total = _framedTotal(buf);
 
-      // Fallback chunked-read protocol: write chunk index, read, append.
+      // Length-prefixed chunked read: write the next chunk index, read the
+      // served window from that offset, append, until the declared length is
+      // satisfied. The 1-byte chunk index caps the walk at 255 windows, which
+      // is far more than a photo-stripped card ever needs.
       var chunk = 1;
-      while (card == null && chunk <= 96) {
-        await chr.write([chunk], withoutResponse: false);
+      while ((total == null || buf.length < total) && chunk <= 255) {
+        try {
+          await chr.write([chunk], withoutResponse: false);
+        } catch (_) {
+          break;
+        }
         final part = await chr.read();
         if (part.isEmpty) break;
-        bytes = [...bytes, ...part];
-        card = _tryDecodeCard(bytes);
+        buf.addAll(part);
+        total ??= _framedTotal(buf);
         chunk++;
+      }
+
+      ProfileCard? card;
+      if (total != null && buf.length >= total) {
+        card = _tryDecodeCard(buf.sublist(4, total));
       }
 
       if (card != null) {
         peer.card = card;
+        peer.verified = card.verified;
         _cardByEid[peer.eid] = card;
         if (card.sub.isNotEmpty) _subToEid[card.sub] = peer.eid;
         if (_running && gen == _generation) _emitNearby();
@@ -669,6 +691,16 @@ class BleProximityEngine implements ProximityEngine {
         await peer.device.disconnect();
       } catch (_) {}
     }
+  }
+
+  /// Total framed length (4-byte header + declared payload) once the header has
+  /// arrived, else null.
+  int? _framedTotal(List<int> bytes) {
+    if (bytes.length < 4) return null;
+    final len =
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
+    if (len < 0) return null;
+    return 4 + len;
   }
 
   ProfileCard? _tryDecodeCard(List<int> bytes) {
@@ -684,22 +716,59 @@ class BleProximityEngine implements ProximityEngine {
   // Outbound writes
   // -------------------------------------------------------------------------
 
+  /// JSON of [card] with the photo thumbnail omitted (never sent over BLE).
+  static String _cardJsonWithoutPhoto(ProfileCard card) {
+    final map = card.toJson()..remove('photo');
+    return jsonEncode(map);
+  }
+
+  /// Strips the embedded card's photo thumbnail from a request/response
+  /// payload JSON in place (the card lives under the `'card'` key).
+  static void _stripCardPhoto(Map<String, dynamic> json) {
+    final card = json['card'];
+    if (card is Map) card.remove('photo');
+  }
+
   Future<bool> _writeJsonTo(
       String peerSub, String charUuid, Map<String, dynamic> json) async {
     final eid = _subToEid[peerSub];
     final peer = eid == null ? null : _peers[eid];
     if (peer == null) return false;
-    final bytes = utf8.encode(jsonEncode(json));
+
+    // Length-prefixed frame so the receiver's reassembly knows the exact size.
+    final payload = utf8.encode(jsonEncode(json));
+    final framed = Uint8List(4 + payload.length);
+    final len = payload.length;
+    framed[0] = (len >> 24) & 0xff;
+    framed[1] = (len >> 16) & 0xff;
+    framed[2] = (len >> 8) & 0xff;
+    framed[3] = len & 0xff;
+    framed.setRange(4, framed.length, payload);
 
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         final chr = await _connectAndFind(peer.device, charUuid);
         if (chr == null) continue;
-        await chr.write(
-          bytes,
-          withoutResponse: false,
-          allowLongWrite: bytes.length > 400,
-        );
+
+        // Base the chunk size on the negotiated MTU (request a larger one on
+        // Android where the API allows) so payloads over the iOS ~185-byte MTU
+        // are split into sequential mtu-3 writes instead of failing.
+        var mtu = peer.device.mtuNow;
+        if (Platform.isAndroid) {
+          try {
+            mtu = await peer.device.requestMtu(_maxWriteChunk);
+          } catch (_) {}
+        }
+        final chunkSize =
+            math.max(20, math.min(mtu - 3, _maxWriteChunk));
+
+        for (var off = 0; off < framed.length; off += chunkSize) {
+          final end = math.min(off + chunkSize, framed.length);
+          await chr.write(
+            framed.sublist(off, end),
+            withoutResponse: false,
+          );
+        }
         return true;
       } catch (_) {
         // retry once
@@ -764,44 +833,41 @@ class _BlePeer {
   final DistanceEstimator estimator = DistanceEstimator();
   double meters = double.infinity;
   int? rssi;
+
+  /// Mood-over-BLE is not implemented this phase — peers default to networking
+  /// and the ProfileCard read does not carry mood.
   MoodRing mood = MoodRing.networking;
   bool verified = false;
   DateTime lastSeen = DateTime.now();
+
+  /// Sighting time of the last scan result actually processed for this peer,
+  /// used to ignore fbp's cumulative re-emissions of unchanged results.
+  DateTime? lastResultAt;
   ProfileCard? card;
   bool cardReadInFlight = false;
   int cardReadAttempts = 0;
 }
 
-/// Accumulates (possibly chunked/offset) GATT writes until they parse as a
-/// JSON object.
+/// Accumulates length-prefixed, chunked GATT writes (4-byte big-endian length
+/// header + JSON payload) until the full frame has arrived.
 class _WriteBuffer {
   final List<int> _bytes = [];
   DateTime lastWrite = DateTime.now();
 
-  void write(int offset, List<int> value) {
+  void add(List<int> value) {
     lastWrite = DateTime.now();
-    if (offset >= _bytes.length) {
-      // Pad gaps defensively (shouldn't happen with well-behaved stacks).
-      while (_bytes.length < offset) {
-        _bytes.add(0);
-      }
-      _bytes.addAll(value);
-    } else {
-      // Overlapping rewrite — replace in place, extend as needed.
-      for (var i = 0; i < value.length; i++) {
-        final at = offset + i;
-        if (at < _bytes.length) {
-          _bytes[at] = value[i];
-        } else {
-          _bytes.add(value[i]);
-        }
-      }
-    }
+    _bytes.addAll(value);
   }
 
-  Map<String, dynamic>? tryParseJson() {
+  /// Returns the decoded JSON object once the declared length has fully
+  /// arrived, otherwise null (more chunks still expected).
+  Map<String, dynamic>? takeComplete() {
+    if (_bytes.length < 4) return null;
+    final len =
+        (_bytes[0] << 24) | (_bytes[1] << 16) | (_bytes[2] << 8) | _bytes[3];
+    if (len < 0 || _bytes.length < 4 + len) return null;
     try {
-      final decoded = jsonDecode(utf8.decode(_bytes));
+      final decoded = jsonDecode(utf8.decode(_bytes.sublist(4, 4 + len)));
       return decoded is Map<String, dynamic> ? decoded : null;
     } catch (_) {
       return null;

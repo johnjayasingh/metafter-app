@@ -17,6 +17,9 @@ class ConnectionRepositoryImpl implements ConnectionRepository {
     if (!_changes.isClosed) _changes.add(null);
   }
 
+  /// Force live `watch*` streams to re-query after a bulk wipe (finding [10]).
+  void refresh() => _notify();
+
   @override
   Stream<List<Connection>> watchAll() => watchQuery(_changes.stream, () async {
         final rows = await _db.query('connections', orderBy: 'connected_at DESC');

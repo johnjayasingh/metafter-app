@@ -32,10 +32,17 @@ class _ChatScreenState extends State<ChatScreen> {
   Duration? _ttl;
   bool _nearby = false;
   bool _hasText = false;
+
+  /// Whether a connection row still exists for this peer. Goes false when the
+  /// peer disconnects us (the thread + this screen outlive the connection),
+  /// which locks the composer so a send can't silently throw (finding [18]).
+  bool _connected = true;
+
+  /// Message count last handled by [_onSnapshot] — drives autoscroll off the
+  /// same snapshot the StreamBuilder renders (finding [21]).
   int _lastCount = 0;
 
   late final Stream<List<ChatMessage>> _thread;
-  StreamSubscription<List<ChatMessage>>? _threadWatchSub;
   StreamSubscription<dynamic>? _nearbySub;
   final List<StreamSubscription<List<ThreadSummary>>> _threadInfoSubs = [];
   Timer? _presenceTimer;
@@ -45,17 +52,18 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     final services = AppServices.I;
 
-    // Rendering stream — subscribed exactly once by the StreamBuilder.
+    // Single rendering stream — the StreamBuilder is the only listener, and
+    // read-marking + autoscroll are driven from that same snapshot (finding
+    // [21]) rather than a second racing subscription.
     _thread = services.messages.watchThread(widget.peerSub);
-
-    // Separate fresh watch for read-marking + autoscroll (watch* streams are
-    // single-listener; never share one across listeners).
-    _threadWatchSub =
-        services.messages.watchThread(widget.peerSub).listen(_onThread);
 
     // Header card: prefer the connection row, fall back to the thread card.
     services.connections.byPeer(widget.peerSub).then((c) {
-      if (mounted && c != null) setState(() => _card = c.card);
+      if (!mounted) return;
+      setState(() {
+        if (c != null) _card = c.card;
+        _connected = c != null;
+      });
     });
     for (final archived in const [false, true]) {
       _threadInfoSubs.add(
@@ -90,7 +98,6 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _presenceTimer?.cancel();
     _nearbySub?.cancel();
-    _threadWatchSub?.cancel();
     for (final s in _threadInfoSubs) {
       s.cancel();
     }
@@ -101,19 +108,35 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool get _reduceMotion => AppServices.I.settings.reduceMotion.value;
 
-  void _refreshPresence() {
+  Future<void> _refreshPresence() async {
     if (!mounted) return;
     final nearby = AppServices.I.messaging.isPeerNearby(widget.peerSub);
-    if (nearby != _nearby) setState(() => _nearby = nearby);
+    final connected =
+        await AppServices.I.connections.byPeer(widget.peerSub) != null;
+    if (!mounted) return;
+    if (nearby != _nearby || connected != _connected) {
+      setState(() {
+        _nearby = nearby;
+        _connected = connected;
+      });
+    }
   }
 
-  void _onThread(List<ChatMessage> messages) {
-    // New inbound while the chat is visible → mark it read.
+  /// Drives read-marking + autoscroll from the exact snapshot the
+  /// StreamBuilder renders, so the scroll is measured against the list that
+  /// is actually being laid out this frame (finding [21]).
+  void _onSnapshot(List<ChatMessage> messages) {
+    // A received message that is not yet read while the chat is visible →
+    // mark the thread read. markThreadRead also flips received statuses to
+    // `read`, so the re-emitted snapshot fails this guard and the mark cannot
+    // loop (coordination with the data agent's markThreadRead change).
     if (messages.any((m) => !m.fromMe && m.status != MessageStatus.read)) {
       unawaited(AppServices.I.messaging.markRead(widget.peerSub));
     }
-    if (messages.length > _lastCount) _scrollToBottom();
-    _lastCount = messages.length;
+    if (messages.length != _lastCount) {
+      _lastCount = messages.length;
+      _scrollToBottom();
+    }
   }
 
   void _scrollToBottom() {
@@ -138,8 +161,19 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
-    _controller.clear();
-    await AppServices.I.messaging.send(widget.peerSub, text);
+    try {
+      // Keep the typed text until the send actually resolves — if the peer
+      // disconnected us, send() throws StateError and nothing must be lost
+      // (finding [18]).
+      await AppServices.I.messaging.send(widget.peerSub, text);
+      _controller.clear();
+    } on StateError {
+      if (!mounted) return;
+      setState(() => _connected = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You are no longer connected')),
+      );
+    }
   }
 
   void _openCall({required bool isVideo}) {
@@ -503,6 +537,7 @@ class _ChatScreenState extends State<ChatScreen> {
               stream: _thread,
               builder: (context, snapshot) {
                 final messages = snapshot.data ?? const <ChatMessage>[];
+                _onSnapshot(messages);
                 final use24h = settings.use24hTime.value;
                 return ListView.builder(
                   controller: _scrollController,
@@ -571,6 +606,24 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
+
+          // Inline state when the peer has disconnected us — the composer is
+          // still usable (BLE/relay may recover), but sends will fail until
+          // the connection is re-established (finding [18]).
+          if (!_connected)
+            Container(
+              width: double.infinity,
+              color: const Color(0xFFFDECEC),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: const Text(
+                'You are no longer connected',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.brandRed,
+                ),
+              ),
+            ),
 
           // ── Input bar ──
           Container(

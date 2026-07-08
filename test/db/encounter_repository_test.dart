@@ -112,6 +112,22 @@ void main() {
     await sub.cancel();
   });
 
+  test('watchDay includes a 23:30 encounter (calendar day, not +24h)',
+      () async {
+    // With start.add(Duration(days: 1)) the window end drifts off true local
+    // midnight on DST transition days, dropping late-evening encounters
+    // (finding [11]). Calendar arithmetic keeps 23:30 inside the day.
+    final lateNight = DateTime(2026, 11, 1, 23, 30);
+    await repo.recordSighting(peer(eid: 'late', sub: 'sub-late', lastSeen: lateNight));
+
+    final today = await repo.watchDay(DateTime(2026, 11, 1)).first;
+    expect(today.map((e) => e.card.sub), contains('sub-late'));
+
+    // And it must not bleed into the next day.
+    final tomorrow = await repo.watchDay(DateTime(2026, 11, 2)).first;
+    expect(tomorrow.map((e) => e.card.sub), isNot(contains('sub-late')));
+  });
+
   test('daysWithEncounters returns distinct local days, newest first',
       () async {
     await repo.recordSighting(peer(lastSeen: noon));

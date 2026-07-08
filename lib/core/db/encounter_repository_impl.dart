@@ -21,10 +21,19 @@ class EncounterRepositoryImpl implements EncounterRepository {
     if (!_changes.isClosed) _changes.add(null);
   }
 
+  /// Force every live `watch*` stream to re-query. Used after a bulk wipe
+  /// (finding [10]) so listeners re-emit an empty ledger.
+  void refresh() => _notify();
+
   @override
   Stream<List<Encounter>> watchDay(DateTime day) {
     final start = DateTime(day.year, day.month, day.day);
-    final end = start.add(const Duration(days: 1));
+    // Calendar arithmetic, NOT start.add(Duration(days: 1)): on DST transition
+    // days a calendar day is 23 or 25 absolute hours, so adding a fixed 24h
+    // would leave a gap (or overlap) around midnight (finding [11]).
+    // DateTime normalises day overflow to the true next local midnight, and
+    // this matches daysWithEncounters' local-day bucketing.
+    final end = DateTime(day.year, day.month, day.day + 1);
     return watchQuery(_changes.stream, () async {
       final rows = await _db.query(
         'encounters',

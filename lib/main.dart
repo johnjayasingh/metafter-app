@@ -5,6 +5,7 @@ import 'core/config/environment_config.dart';
 import 'core/data/mock_data.dart';
 import 'core/network/api_client.dart';
 import 'core/routes/app_router.dart';
+import 'core/services/app_services.dart';
 import 'core/services/bootstrap_services.dart';
 import 'core/theme/app_theme.dart';
 import 'features/signup/data/signup_draft.dart';
@@ -32,6 +33,11 @@ Future<void> bootstrap({
   // same screens serve both first-time signup and returning-user login).
   ApiClient().onSessionTimeout = () async {
     await SignupDraft.instance.signOut();
+    // Wipe every local table before routing to signup so the next account on
+    // a shared device never inherits the previous user's messages,
+    // connections, or encounters. Guarded because the service graph may not
+    // be installed yet if a timeout fires mid-bootstrap.
+    if (AppServices.isReady) await wipeLocalData();
     AppRouter.router.go(AppRouter.signupBasics);
   };
 

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../../../core/routes/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -131,8 +132,16 @@ class _SignupPhotoScreenState extends State<SignupPhotoScreen> {
         setState(() => _picking = false);
         return;
       }
+      // The picker hands back a temp/cache path that the OS may purge and
+      // that breaks entirely on iOS (the app-container UUID changes on every
+      // update). Copy it into the app documents directory under a stable
+      // name and persist THAT path so the photo survives. A stable absolute
+      // documents path is accepted for this phase; if it ever breaks the
+      // read side already falls back to the initials placeholder.
+      final stablePath = await _persistPhoto(file);
+      if (!mounted) return;
       // Photo fills the ring; the CTA flips to "Next" (DESIGN_SPEC §3.6).
-      _draft.update(() => _draft.photoPath = file.path);
+      _draft.update(() => _draft.photoPath = stablePath);
     } on Exception catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -140,6 +149,22 @@ class _SignupPhotoScreenState extends State<SignupPhotoScreen> {
       );
     } finally {
       if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  /// Copies the picked image out of the picker's temp cache into the app
+  /// documents directory under a stable name, returning the persisted path.
+  /// On failure falls back to the picker's own path so the user still sees a
+  /// photo this session (it may just not survive a cache purge / app update).
+  Future<String> _persistPhoto(XFile file) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final dest = '${dir.path}/profile_photo.jpg';
+      await File(file.path).copy(dest);
+      return dest;
+    } catch (e) {
+      debugPrint('Could not persist profile photo, using temp path: $e');
+      return file.path;
     }
   }
 

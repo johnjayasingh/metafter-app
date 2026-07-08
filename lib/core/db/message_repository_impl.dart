@@ -9,14 +9,25 @@ import 'watch_query.dart';
 /// sqflite-backed [MessageRepository]: `messages` rows plus denormalised
 /// `threads` summaries kept in sync on every mutation.
 class MessageRepositoryImpl implements MessageRepository {
-  MessageRepositoryImpl(this._db);
+  /// [settings] is optional so repository-only tests can construct the impl
+  /// without the whole settings stack; when present, a brand-new thread seeds
+  /// its disappearing TTL from `settings.disappearingDefault` (finding [13]).
+  MessageRepositoryImpl(this._db, [this._settings]);
 
   final Database _db;
+  final SettingsRepository? _settings;
   final _changes = StreamController<void>.broadcast();
+
+  /// TTL seeded into a NEW thread when the user enabled "disappearing messages
+  /// by default" (finding [13]).
+  static const Duration disappearingDefaultTtl = Duration(hours: 24);
 
   void _notify() {
     if (!_changes.isClosed) _changes.add(null);
   }
+
+  /// Force live `watch*` streams to re-query after a bulk wipe (finding [10]).
+  void refresh() => _notify();
 
   @override
   Stream<List<ThreadSummary>> watchThreads({required bool archived}) =>
@@ -45,52 +56,69 @@ class MessageRepositoryImpl implements MessageRepository {
   @override
   Future<ChatMessage> append(ChatMessage message,
       {required ProfileCard card}) async {
-    final thread = await _threadRow(message.peerSub);
+    late ChatMessage stored;
+    await _db.transaction((txn) async {
+      // Read the thread row INSIDE the transaction (finding [9]). sqflite
+      // serialises transactions, so concurrent appends for a brand-new peer
+      // observe each other's inserts instead of both taking a doomed INSERT
+      // branch and losing messages.
+      final existing = await txn.query(
+        'threads',
+        columns: ['disappearing_ttl_ms'],
+        where: 'peer_sub = ?',
+        whereArgs: [message.peerSub],
+        limit: 1,
+      );
+      final threadExists = existing.isNotEmpty;
 
-    // Honour the thread's disappearing TTL when the caller did not already
-    // stamp an expiry.
-    var stored = message;
-    if (stored.expiresAt == null && thread != null) {
-      final ttlMs = thread['disappearing_ttl_ms'] as int?;
-      if (ttlMs != null) {
+      // Effective TTL: an existing thread keeps its own; a brand-new thread
+      // inherits the "disappearing by default" preference (finding [13]).
+      final int? ttlMs = threadExists
+          ? existing.first['disappearing_ttl_ms'] as int?
+          : (_settings?.disappearingDefault.value ?? false)
+              ? disappearingDefaultTtl.inMilliseconds
+              : null;
+
+      stored = message;
+      if (stored.expiresAt == null && ttlMs != null) {
         stored = stored.copyWith(
           expiresAt: stored.sentAt.add(Duration(milliseconds: ttlMs)),
         );
       }
-    }
 
-    await _db.transaction((txn) async {
       await txn.insert(
         'messages',
         _messageToRow(stored),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
-      if (thread == null) {
-        await txn.insert('threads', {
-          'peer_sub': stored.peerSub,
-          'card_json': card.encode(),
-          'last_message': stored.body,
-          'last_message_at': stored.sentAt.millisecondsSinceEpoch,
-          'last_from_me': stored.fromMe ? 1 : 0,
-          'unread_count': stored.fromMe ? 0 : 1,
-          'archived': 0,
-          'disappearing_ttl_ms': null,
-        });
-      } else {
-        final unread = thread['unread_count'] as int? ?? 0;
-        await txn.update(
-          'threads',
-          {
-            'card_json': card.encode(),
-            'last_message': stored.body,
-            'last_message_at': stored.sentAt.millisecondsSinceEpoch,
-            'last_from_me': stored.fromMe ? 1 : 0,
-            'unread_count': stored.fromMe ? unread : unread + 1,
-          },
-          where: 'peer_sub = ?',
-          whereArgs: [stored.peerSub],
-        );
-      }
+
+      // Atomic upsert of the thread summary (finding [9]): unread_count is
+      // bumped as a SQL expression so two concurrent inbound appends can't
+      // read the same snapshot and clobber the increment. disappearing_ttl_ms
+      // is only set on the INSERT path, so an existing thread keeps its TTL.
+      final inc = stored.fromMe ? 0 : 1;
+      await txn.rawInsert(
+        'INSERT INTO threads '
+        '(peer_sub, card_json, last_message, last_message_at, last_from_me, '
+        'unread_count, archived, disappearing_ttl_ms) '
+        'VALUES (?, ?, ?, ?, ?, ?, 0, ?) '
+        'ON CONFLICT(peer_sub) DO UPDATE SET '
+        'card_json = excluded.card_json, '
+        'last_message = excluded.last_message, '
+        'last_message_at = excluded.last_message_at, '
+        'last_from_me = excluded.last_from_me, '
+        'unread_count = unread_count + ?',
+        [
+          stored.peerSub,
+          card.encode(),
+          stored.body,
+          stored.sentAt.millisecondsSinceEpoch,
+          stored.fromMe ? 1 : 0,
+          inc,
+          ttlMs,
+          inc,
+        ],
+      );
     });
     _notify();
     return stored;
@@ -120,12 +148,27 @@ class MessageRepositoryImpl implements MessageRepository {
 
   @override
   Future<void> markThreadRead(String peerSub) async {
-    await _db.update(
-      'threads',
-      {'unread_count': 0},
-      where: 'peer_sub = ?',
-      whereArgs: [peerSub],
-    );
+    await _db.transaction((txn) async {
+      // Flip received (from_me = 0) messages to 'read' as well as zeroing the
+      // unread badge (finding [8]). Without this, markThreadRead is not
+      // idempotent: the chat screen re-fires markRead on every watchThread
+      // re-emit because a received message is still 'delivered', spinning a
+      // markRead -> notify -> markRead loop. Keep the status string exactly
+      // MessageStatus.read.name so the UI guard ("any received message with
+      // status != read") settles.
+      await txn.update(
+        'messages',
+        {'status': MessageStatus.read.name},
+        where: 'peer_sub = ? AND from_me = 0 AND status != ?',
+        whereArgs: [peerSub, MessageStatus.read.name],
+      );
+      await txn.update(
+        'threads',
+        {'unread_count': 0},
+        where: 'peer_sub = ?',
+        whereArgs: [peerSub],
+      );
+    });
     _notify();
   }
 
@@ -187,15 +230,24 @@ class MessageRepositoryImpl implements MessageRepository {
           );
         } else {
           final last = newest.first;
-          await txn.update(
-            'threads',
-            {
-              'last_message': last['body'] as String,
-              'last_message_at': last['sent_at'] as int,
-              'last_from_me': last['from_me'] as int,
-            },
-            where: 'peer_sub = ?',
-            whereArgs: [peerSub],
+          // Clamp unread_count down to the received messages that actually
+          // survive the sweep (finding [12]). Deleting expired *unread*
+          // incoming messages would otherwise leave a phantom badge counting
+          // messages the user can no longer see.
+          await txn.rawUpdate(
+            'UPDATE threads SET '
+            'last_message = ?, last_message_at = ?, last_from_me = ?, '
+            'unread_count = MIN(unread_count, '
+            '(SELECT COUNT(*) FROM messages '
+            'WHERE peer_sub = ? AND from_me = 0)) '
+            'WHERE peer_sub = ?',
+            [
+              last['body'] as String,
+              last['sent_at'] as int,
+              last['from_me'] as int,
+              peerSub,
+              peerSub,
+            ],
           );
         }
       }
@@ -210,16 +262,6 @@ class MessageRepositoryImpl implements MessageRepository {
       await txn.delete('threads', where: 'peer_sub = ?', whereArgs: [peerSub]);
     });
     _notify();
-  }
-
-  Future<Map<String, Object?>?> _threadRow(String peerSub) async {
-    final rows = await _db.query(
-      'threads',
-      where: 'peer_sub = ?',
-      whereArgs: [peerSub],
-      limit: 1,
-    );
-    return rows.isEmpty ? null : rows.first;
   }
 
   static Map<String, Object?> _messageToRow(ChatMessage m) => {

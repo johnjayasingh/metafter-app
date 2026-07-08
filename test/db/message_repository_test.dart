@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:metafter/core/db/message_repository_impl.dart';
+import 'package:metafter/core/db/settings_repository_impl.dart';
 import 'package:metafter/core/domain/models.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -80,6 +81,46 @@ void main() {
     expect((await summary('alice')).unreadCount, 0);
   });
 
+  test('markThreadRead flips received messages to read and is idempotent',
+      () async {
+    await repo.append(msg('in', fromMe: false, sentAt: t0), card: alice);
+    await repo.append(
+      msg('out', fromMe: true, sentAt: t0.add(const Duration(seconds: 1))),
+      card: alice,
+    );
+
+    await repo.markThreadRead('alice');
+
+    var msgs = await repo.watchThread('alice').first;
+    expect(msgs.firstWhere((m) => m.id == 'in').status, MessageStatus.read);
+    // The message we sent is not force-read by our own markRead.
+    expect(
+        msgs.firstWhere((m) => m.id == 'out').status, isNot(MessageStatus.read));
+
+    // Idempotent: the chat-screen guard ("any received message with status !=
+    // read") must settle so markRead cannot re-arm (finding [8]).
+    await repo.markThreadRead('alice');
+    msgs = await repo.watchThread('alice').first;
+    expect(msgs.where((m) => !m.fromMe && m.status != MessageStatus.read),
+        isEmpty);
+    expect((await summary('alice')).unreadCount, 0);
+  });
+
+  test('concurrent appends for a brand-new peer lose no messages', () async {
+    // Fire both without awaiting the first: before finding [9] both took the
+    // INSERT branch off the same null snapshot and the second rolled back.
+    final f1 = repo.append(msg('c1', fromMe: false, sentAt: t0), card: alice);
+    final f2 = repo.append(
+      msg('c2', fromMe: false, sentAt: t0.add(const Duration(seconds: 1))),
+      card: alice,
+    );
+    await Future.wait([f1, f2]);
+
+    final msgs = await repo.watchThread('alice').first;
+    expect(msgs.map((m) => m.id), containsAll(['c1', 'c2']));
+    expect((await summary('alice')).unreadCount, 2);
+  });
+
   test('watchThread emits chronologically and reacts to mutations', () async {
     final emissions = <List<ChatMessage>>[];
     final sub = repo.watchThread('alice').listen(emissions.add);
@@ -151,6 +192,38 @@ void main() {
     expect(thread.lastFromMe, isFalse);
   });
 
+  test('sweepExpired clamps a stale unread badge when messages remain',
+      () async {
+    final now = DateTime.now();
+    // One surviving unread received message...
+    await repo.append(
+      msg('keep', fromMe: false, body: 'still here', sentAt: now),
+      card: alice,
+    );
+    // ...plus two disappearing received messages counted as unread.
+    await repo.append(
+      msg('e1',
+          fromMe: false,
+          sentAt: now,
+          expiresAt: now.subtract(const Duration(minutes: 1))),
+      card: alice,
+    );
+    await repo.append(
+      msg('e2',
+          fromMe: false,
+          sentAt: now,
+          expiresAt: now.subtract(const Duration(minutes: 1))),
+      card: alice,
+    );
+    expect((await summary('alice')).unreadCount, 3);
+
+    await repo.sweepExpired();
+
+    // Only 'keep' survives, so the badge must clamp to 1 (finding [12]).
+    expect((await repo.watchThread('alice').first).map((m) => m.id), ['keep']);
+    expect((await summary('alice')).unreadCount, 1);
+  });
+
   test('sweepExpired keeps an emptied thread with a blank preview', () async {
     final now = DateTime.now();
     await repo.append(
@@ -179,6 +252,40 @@ void main() {
 
     await repo.sweepExpired();
     expect(await repo.watchThread('alice').first, hasLength(1));
+  });
+
+  test('a new thread seeds its TTL from disappearingDefault', () async {
+    final settings = SettingsRepositoryImpl(db);
+    await settings.load();
+    await settings.setDisappearingDefault(true);
+    final seeded = MessageRepositoryImpl(db, settings);
+
+    final stored = await seeded.append(
+      msg('m1', fromMe: false, sentAt: t0),
+      card: alice,
+    );
+
+    // The message expiry and the thread TTL both come from the 24h default.
+    expect(stored.expiresAt,
+        t0.add(MessageRepositoryImpl.disappearingDefaultTtl));
+    final thread =
+        (await seeded.watchThreads(archived: false).first).single;
+    expect(thread.disappearingTtl, MessageRepositoryImpl.disappearingDefaultTtl);
+  });
+
+  test('a new thread keeps a NULL TTL when disappearingDefault is off',
+      () async {
+    final settings = SettingsRepositoryImpl(db);
+    await settings.load(); // default false
+    final plain = MessageRepositoryImpl(db, settings);
+
+    final stored =
+        await plain.append(msg('m1', fromMe: false, sentAt: t0), card: alice);
+
+    expect(stored.expiresAt, isNull);
+    expect(
+        (await plain.watchThreads(archived: false).first).single.disappearingTtl,
+        isNull);
   });
 
   test('setArchived moves threads between the two lists', () async {

@@ -47,6 +47,13 @@ class _HomeShellState extends State<HomeShell>
   late final AnimationController _pageAnim;
   int _page = _homeIndex;
 
+  /// The listener attached to [_pageAnim] for the in-flight snap animation.
+  /// Kept so it can be removed deterministically the moment the animation is
+  /// interrupted — [AnimationController.stop] cancels the TickerFuture, so
+  /// `forward().whenComplete` never runs on interruption and cannot be relied
+  /// on to detach it.
+  VoidCallback? _pageListener;
+
   /// Single-listener repo stream — created once for the shell's lifetime and
   /// consumed by exactly one StreamBuilder (in _DiscoverCard's stable root).
   late final Stream<int> _pendingCount;
@@ -68,19 +75,33 @@ class _HomeShellState extends State<HomeShell>
     super.dispose();
   }
 
+  /// Detaches the current snap-animation listener, if any. Called before
+  /// every new animation and on drag start so a stopped/interrupted animation
+  /// never leaves its listener writing stale values to [_pagePos].
+  void _detachPageListener() {
+    final listener = _pageListener;
+    if (listener != null) {
+      _pageAnim.removeListener(listener);
+      _pageListener = null;
+    }
+  }
+
   /// Animates the carousel to [target] (0..2) and updates the settled page.
   void _goToPage(int target) {
+    _detachPageListener();
+    _pageAnim
+      ..stop()
+      ..reset();
     final t = target.clamp(0, 2).toDouble();
     final anim = Tween<double>(begin: _pagePos.value, end: t).animate(
       CurvedAnimation(parent: _pageAnim, curve: Curves.easeOutCubic),
     );
+    // Drive from the controller (not the tween) so the listener can be
+    // removed later without holding the tween instance.
     void listener() => _pagePos.value = anim.value;
-    anim.addListener(listener);
-    _pageAnim
-      ..stop()
-      ..reset();
+    _pageListener = listener;
+    _pageAnim.addListener(listener);
     _pageAnim.forward().whenComplete(() {
-      anim.removeListener(listener);
       if (mounted && _page != t.round()) setState(() => _page = t.round());
     });
   }
@@ -142,7 +163,13 @@ class _HomeShellState extends State<HomeShell>
     final services = AppServices.I;
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
+    // The pull-up sheet lives on the root navigator; it stays open over
+    // HomeShell's Scaffold and would hide the confirmation SnackBar (and its
+    // 'Find them' action) that renders at the bottom. Close it first so the
+    // primary post-accept affordance is actually visible (finding [19]).
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
     await services.connection.accept(request);
+    if (rootNavigator.canPop()) rootNavigator.pop();
     final stillNearby = services.engine.isNearby(request.peerSub);
     messenger.showSnackBar(
       SnackBar(
@@ -224,6 +251,10 @@ class _HomeShellState extends State<HomeShell>
                     page: _page,
                     immersive: immersive,
                     incognito: incognito,
+                    // Advertising can't be hot-restarted mid-session, so the
+                    // visibility toggle is locked while active to avoid a
+                    // false "they can't see you" confirmation (finding [17]).
+                    sessionActive: active,
                     onIncognito: _setIncognito,
                     onPrev: () => _goToPage(_page - 1),
                     onNext: () => _goToPage(_page + 1),
@@ -237,7 +268,10 @@ class _HomeShellState extends State<HomeShell>
                 Expanded(
                   child: _PeekCarousel(
                     position: _pagePos,
-                    onDragStart: () => _pageAnim.stop(),
+                    onDragStart: () {
+                      _detachPageListener();
+                      _pageAnim.stop();
+                    },
                     onSnap: _goToPage,
                     home: _DiscoverCard(
                       photoPath: hasPhoto ? photo : null,
@@ -425,6 +459,7 @@ class _SharedHeader extends StatelessWidget {
     required this.page,
     required this.immersive,
     required this.incognito,
+    required this.sessionActive,
     required this.onIncognito,
     required this.onPrev,
     required this.onNext,
@@ -433,6 +468,9 @@ class _SharedHeader extends StatelessWidget {
   final int page;
   final bool immersive;
   final bool incognito;
+
+  /// While true the incognito switch is locked (see finding [17]).
+  final bool sessionActive;
   final ValueChanged<bool> onIncognito;
   final VoidCallback onPrev;
   final VoidCallback onNext;
@@ -460,6 +498,7 @@ class _SharedHeader extends StatelessWidget {
           _IncognitoSwitch(
             value: incognito,
             immersive: immersive,
+            enabled: !sessionActive,
             onChanged: onIncognito,
           ),
           const SizedBox(width: 4),
@@ -1460,6 +1499,24 @@ class _ConnectSheetModalState extends State<_ConnectSheetModal> {
 
   bool _expanded = false;
 
+  /// Request ids with an accept/decline in flight — mirrors
+  /// ConnectRequestsScreen._busy so a double-tap can't fire the async action
+  /// twice before the row disappears (finding [20]).
+  final Set<String> _busy = {};
+
+  Future<void> _run(
+    ConnectionRequest request,
+    Future<void> Function(ConnectionRequest) action,
+  ) async {
+    if (!_busy.add(request.id)) return;
+    setState(() {});
+    try {
+      await action(request);
+    } finally {
+      if (mounted) setState(() => _busy.remove(request.id));
+    }
+  }
+
   void _goFull() {
     if (_expanded) return;
     _expanded = true;
@@ -1583,11 +1640,17 @@ class _ConnectSheetModalState extends State<_ConnectSheetModal> {
                       ),
                       SliverList(
                         delegate: SliverChildBuilderDelegate(
-                          (context, i) => _SheetRequestTile(
-                            request: items[i],
-                            onAccept: () => widget.onAccept(items[i]),
-                            onDecline: () => widget.onDecline(items[i]),
-                          ),
+                          (context, i) {
+                            final request = items[i];
+                            return _SheetRequestTile(
+                              request: request,
+                              busy: _busy.contains(request.id),
+                              onAccept: () =>
+                                  _run(request, widget.onAccept),
+                              onDecline: () =>
+                                  _run(request, widget.onDecline),
+                            );
+                          },
                           childCount: items.length,
                         ),
                       ),
@@ -1609,11 +1672,15 @@ class _ConnectSheetModalState extends State<_ConnectSheetModal> {
 class _SheetRequestTile extends StatelessWidget {
   const _SheetRequestTile({
     required this.request,
+    required this.busy,
     required this.onAccept,
     required this.onDecline,
   });
 
   final ConnectionRequest request;
+
+  /// While true an accept/decline is in flight and the buttons are disabled.
+  final bool busy;
   final VoidCallback onAccept;
   final VoidCallback onDecline;
 
@@ -1668,9 +1735,9 @@ class _SheetRequestTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          _RedBtn(label: 'Accept', onPressed: onAccept),
+          _RedBtn(label: 'Accept', onPressed: busy ? null : onAccept),
           const SizedBox(width: 8),
-          _GrayBtn(label: 'Decline', onPressed: onDecline),
+          _GrayBtn(label: 'Decline', onPressed: busy ? null : onDecline),
         ],
       ),
     );
@@ -1680,7 +1747,7 @@ class _SheetRequestTile extends StatelessWidget {
 class _RedBtn extends StatelessWidget {
   const _RedBtn({required this.label, required this.onPressed});
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -1703,7 +1770,7 @@ class _RedBtn extends StatelessWidget {
 class _GrayBtn extends StatelessWidget {
   const _GrayBtn({required this.label, required this.onPressed});
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -1732,12 +1799,17 @@ class _IncognitoSwitch extends StatelessWidget {
   const _IncognitoSwitch({
     required this.value,
     required this.immersive,
+    required this.enabled,
     required this.onChanged,
   });
 
   /// `true` = incognito (hidden from others), `false` = public (visible).
   final bool value;
   final bool immersive;
+
+  /// When false the switch is locked (an active session can't hot-restart
+  /// advertising) and a tap explains why instead of flipping the value.
+  final bool enabled;
   final ValueChanged<bool> onChanged;
 
   @override
@@ -1750,30 +1822,45 @@ class _IncognitoSwitch extends StatelessWidget {
     return Semantics(
       label: value ? 'Incognito mode on' : 'Public mode on',
       toggled: value,
-      child: GestureDetector(
-        onTap: () => onChanged(!value),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          width: 58,
-          height: 30,
-          padding: const EdgeInsets.all(2),
-          decoration: BoxDecoration(
-            color: trackColor,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Align(
-            alignment: value ? Alignment.centerLeft : Alignment.centerRight,
-            child: Container(
-              width: 26,
-              height: 26,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white,
-              ),
-              child: const Center(
-                child: CustomPaint(
-                  size: Size(18, 18),
-                  painter: _IncognitoHatPainter(),
+      enabled: enabled,
+      child: Opacity(
+        opacity: enabled ? 1.0 : 0.5,
+        child: GestureDetector(
+          onTap: () {
+            if (!enabled) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  duration: Duration(seconds: 2),
+                  content: Text('End your session to change visibility.'),
+                ),
+              );
+              return;
+            }
+            onChanged(!value);
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: 58,
+            height: 30,
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              color: trackColor,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Align(
+              alignment: value ? Alignment.centerLeft : Alignment.centerRight,
+              child: Container(
+                width: 26,
+                height: 26,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white,
+                ),
+                child: const Center(
+                  child: CustomPaint(
+                    size: Size(18, 18),
+                    painter: _IncognitoHatPainter(),
+                  ),
                 ),
               ),
             ),

@@ -17,6 +17,9 @@ class RequestRepositoryImpl implements RequestRepository {
     if (!_changes.isClosed) _changes.add(null);
   }
 
+  /// Force live `watch*` streams to re-query after a bulk wipe (finding [10]).
+  void refresh() => _notify();
+
   @override
   Stream<List<ConnectionRequest>> watchIncomingPending() =>
       watchQuery(_changes.stream, _incomingPending);

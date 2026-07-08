@@ -80,7 +80,12 @@ class MessageServiceImpl implements MessageService {
       status: MessageStatus.sending,
       expiresAt: ttl == null ? null : now.add(ttl),
     );
-    await _messages.append(message, card: connection.card);
+    // append may stamp an expiry we didn't compute here — e.g. the FIRST
+    // message to a brand-new peer, where the thread is seeded from the
+    // "disappearing by default" setting (finding [13]). Propagate whatever
+    // expiry actually landed so the peer disappears the message in step.
+    final stored = await _messages.append(message, card: connection.card);
+    final expiresInSec = stored.expiresAt?.difference(now).inSeconds;
 
     final delivered = await _deliver(
       peerSub: peerSub,
@@ -91,7 +96,7 @@ class MessageServiceImpl implements MessageService {
         'messageId': message.id,
         'body': body,
         'sentAt': now.toUtc().toIso8601String(),
-        if (ttl != null) 'expiresInSec': ttl.inSeconds,
+        if (expiresInSec != null) 'expiresInSec': expiresInSec,
       },
     );
     // On failure the bubble stays in `sending` — visible to the user and

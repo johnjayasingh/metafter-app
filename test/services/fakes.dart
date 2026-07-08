@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:metafter/core/db/seen_message_store.dart';
 import 'package:metafter/core/domain/models.dart';
 import 'package:metafter/core/proximity/proximity_engine.dart';
 import 'package:metafter/core/repositories/repositories.dart';
@@ -301,6 +302,19 @@ class FakeSettingsRepository implements SettingsRepository {
       companyVisibility.value = v;
   @override
   Future<void> setIsPro(bool v) async => isPro.value = v;
+}
+
+/// In-memory [SeenMessageLedger] for InboundHandler replay tests (finding
+/// [0]). [record] returns true only the first time an id is seen.
+class FakeSeenMessageLedger implements SeenMessageLedger {
+  final Set<String> seen = {};
+
+  @override
+  Future<bool> record(String messageId, DateTime seenAt) async =>
+      seen.add(messageId);
+
+  @override
+  Future<void> pruneBefore(DateTime before) async {}
 }
 
 class FakeProximityEngine implements ProximityEngine {

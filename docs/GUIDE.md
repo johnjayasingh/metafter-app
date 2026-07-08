@@ -190,8 +190,8 @@ filled in `lib/core/config/environment_config.dart` (currently TODO).
 ### Tests
 
 ```bash
-cd metafter-app && flutter analyze && flutter test    # 126 tests, 0 analyzer issues
-cd metafter-backend && npx tsc --noEmit && npm test   # 19 tests
+cd metafter-app && flutter analyze && flutter test    # 134 tests, 0 analyzer issues
+cd metafter-backend && npx tsc --noEmit && npm test   # 25 tests
 ```
 
 ### Deploying the backend
@@ -211,23 +211,48 @@ npm run deploy:dev                  # deploys auth/data/storage/iot/api
 
 Verified in this environment:
 - `flutter analyze`: **0 issues** (lib + test). `dart analyze`: clean on every new module.
-- **126 Flutter tests**: crypto round-trips (seal/open, sign/verify, sim-persona
-  interop), DB merge/unread/sweep logic, Pro-gating decision table, inbound
-  authentication (identity substitution and non-connection messages dropped),
-  simulated engine choreography, and widget tests for shell, discover,
-  requests, messages, chat, and settings.
-- **19 backend tests**: directory upsert/rotation, mailbox lifecycle, envelope
-  validation rejections, verification happy/failure paths (badge only on
-  success; photo deleted either way), account deletion.
+- **134 Flutter tests**: crypto round-trips (seal/open, sign/verify, sim-persona
+  interop), DB merge/unread/sweep logic, replay-ledger rejection, Pro-gating
+  decision table, inbound authentication (identity substitution and
+  non-connection messages dropped), simulated engine choreography, and widget
+  tests for shell, discover, requests, messages, chat, and settings.
+- **25 backend tests**: directory upsert/rotation, mailbox lifecycle, envelope
+  validation rejections (incl. crafted ids and bad kinds), verification
+  happy/failure + caller-binding paths (badge only on success; photo deleted
+  either way), account deletion.
 - **Live local E2E**: directory publish → key fetch → mailbox deposit →
   **MQTT fanout observed on the recipient's inbox topic** → drain → ACK →
-  empty → account delete → 404.
+  empty → account delete → 404; plus runtime rejection of a crafted envelope
+  id and an invalid kind (both HTTP 400).
+- `flutter build apk --flavor local`: full Android build succeeds (BLE plugins
+  and the Amplify liveness SDK link; core library desugaring enabled).
 - `cdk synth`: exactly the 8 intended Cognito-authorized routes, two tables.
+
+### Adversarial review pass
+
+A multi-lens bug hunt with two independent skeptics verifying every candidate
+surfaced **23 confirmed defects** (11 candidates refuted); **all 23 were
+fixed** and are covered by the numbers above. The most consequential:
+- **BLE discovery was dead on both platforms** — service-data adverts throw on
+  iOS and overflow Android's 31-byte packet. Reworked to advertise the service
+  UUID only (identical for all users → strictly more private) with identity
+  moved into the GATT profile-card read; photos are stripped from BLE payloads
+  and cards use length-prefixed chunked read/write sized to the negotiated MTU.
+- **`markRead` feedback loop** (CPU/receipt spam) — `markThreadRead` now also
+  marks received messages read, making it idempotent.
+- **Sign-out never wiped local data** — a shared device leaked the prior user's
+  chats/graph/history; `wipeLocalData()` now clears every table + keys on
+  session timeout.
+- **Message-loss race** on burst inbound → atomic `INSERT … ON CONFLICT` upsert.
+- **Disappearing-message replay** → durable seen-id ledger + freshness window.
+- **Backend**: crafted envelope ids made un-ACKable mailbox rows (now charset-
+  validated); a stolen liveness session id could forge a verified badge (now
+  bound to the caller's S3 prefix).
 
 Needs physical devices (cannot be exercised here):
 - Two-phone BLE: advertise/scan/GATT card exchange, request/accept over GATT,
-  chunked reads on real MTUs, Android 12+ permission prompts, iOS peripheral
-  behavior (see §8), EID rotation mid-session.
+  length-prefixed chunked reads/writes on real MTUs, Android 12+ permission
+  prompts, iOS peripheral behavior (see §8).
 - MQTT-over-WSS against real IoT Core from the app (SigV4 URL logic is
   salvaged from previously working code; endpoint policy is deployed).
 - Rekognition Face Liveness on iOS requires the one-time Xcode step of adding
@@ -257,10 +282,13 @@ Needs physical devices (cannot be exercised here):
 1. **flutter_blue_plus licensing** — v2.3.3 requires a paid license for
    commercial use; the code passes `License.free`. Resolve before shipping
    (or swap the central role onto `bluetooth_low_energy`, which is BSD).
-2. **iOS advertising** — CoreBluetooth cannot put service data in
-   advertisements: iOS-advertised peers reveal EID/flags/mood only after the
-   GATT card read; mood ring defaults to Networking until then. Background
-   BLE (state restoration, foreground service polish) is roadmap.
+2. **BLE advertising carries no metadata** — after the review, all devices
+   advertise only the service UUID (the reliable cross-platform shape);
+   identity and verified status come from the GATT card read, and mood-over-
+   BLE + a live pre-card distance are deferred (radar mood ring defaults to
+   Networking until the card loads). Photos never traverse BLE, so BLE-
+   discovered peers show initials. Background BLE (state restoration,
+   foreground service) is roadmap.
 3. **Email auth** — the spec allows email *or* phone; only phone-OTP exists.
    The email field is collected but decorative.
 4. **No retry queue** — a message that fails both BLE and relay stays in
@@ -275,7 +303,9 @@ Needs physical devices (cannot be exercised here):
    product stance; encrypted export is a roadmap item).
 9. **uat/prod configs** — `environment_config.dart` values are TODO until
    those stacks are deployed.
-10. **Mood-ring/incognito changes mid-session** apply from the next session.
+10. **Incognito can't be toggled mid-session** — to avoid a false "you're
+    hidden" state, the toggle is disabled while a session is active (end the
+    session to change visibility).
 
 ## 9. Design-spec traceability
 

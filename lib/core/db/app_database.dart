@@ -10,7 +10,9 @@ abstract final class AppDatabase {
   static const String dbName = 'metafter.db';
 
   /// Current schema version.
-  static const int schemaVersion = 1;
+  ///
+  /// v2 adds the durable `seen_messages` replay ledger (finding [0]).
+  static const int schemaVersion = 2;
 
   /// Open (creating on first run) the app database.
   ///
@@ -29,8 +31,16 @@ abstract final class AppDatabase {
         version: schemaVersion,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
       ),
     );
+  }
+
+  static Future<void> _onUpgrade(
+      Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await _createSeenMessages(db);
+    }
   }
 
   static Future<void> _onCreate(Database db, int version) async {
@@ -135,5 +145,44 @@ abstract final class AppDatabase {
         value TEXT NOT NULL
       )
     ''');
+
+    await _createSeenMessages(db);
+  }
+
+  /// Durable processed-message ledger for replay protection (finding [0]).
+  /// Independent of thread retention: an id stays here even after its message
+  /// row is purged by the disappearing sweep, so a re-injected envelope is
+  /// still recognised as a replay. Bounded by a periodic prune on `seen_at`.
+  static Future<void> _createSeenMessages(Database db) async {
+    await db.execute('''
+      CREATE TABLE seen_messages (
+        message_id TEXT PRIMARY KEY,
+        seen_at INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX idx_seen_messages_seen_at ON seen_messages (seen_at)');
+  }
+
+  /// Names of every table wiped by [clearAllData], in FK-safe order.
+  static const List<String> _allTables = [
+    'my_profile',
+    'encounters',
+    'requests',
+    'connections',
+    'threads',
+    'messages',
+    'settings',
+    'seen_messages',
+  ];
+
+  /// Delete every row from every table (sign-out / account change, finding
+  /// [10]). Keeps the schema so repositories can keep using the open handle.
+  static Future<void> clearAllData(Database db) async {
+    await db.transaction((txn) async {
+      for (final table in _allTables) {
+        await txn.delete(table);
+      }
+    });
   }
 }

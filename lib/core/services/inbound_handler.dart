@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../db/seen_message_store.dart';
 import '../domain/models.dart';
 import '../proximity/proximity_engine.dart';
 import '../repositories/repositories.dart';
@@ -26,16 +27,30 @@ class InboundHandler {
     required MessageRepository messages,
     ReceiptSender? sendReceipt,
     DateTime Function()? now,
+    SeenMessageLedger? seen,
+    Duration replayWindow = const Duration(days: 7),
   })  : _requests = requests,
         _connections = connections,
         _messages = messages,
         _sendReceipt = sendReceipt,
-        _now = now ?? DateTime.now;
+        _now = now ?? DateTime.now,
+        _seen = seen,
+        _replayWindow = replayWindow;
 
   final RequestRepository _requests;
   final ConnectionRepository _connections;
   final MessageRepository _messages;
   final DateTime Function() _now;
+
+  /// Durable replay ledger (finding [0]). Optional so unit tests can exercise
+  /// the content-dedupe path in isolation; wired to the sqflite-backed ledger
+  /// in bootstrap.
+  final SeenMessageLedger? _seen;
+
+  /// Messages whose `sentAt` is older than this are rejected outright, so a
+  /// long-retained envelope can't resurrect a long-expired disappearing
+  /// message and the ledger stays bounded (finding [0]).
+  final Duration _replayWindow;
 
   ReceiptSender? _sendReceipt;
 
@@ -100,11 +115,29 @@ class InboundHandler {
       return;
     }
 
-    // Dedupe: the sender may have delivered over BLE and relay both.
+    final now = _now();
+
+    // Durable replay protection (finding [0]). Reject stale envelopes outright
+    // (bounds the ledger and stops resurrection of long-expired disappearing
+    // messages), then dedupe against the persistent seen-id ledger, which
+    // survives the message row being purged — so a re-injected envelope is
+    // dropped even once the thread no longer contains its id.
+    if (_seen != null) {
+      if (now.difference(sentAt) > _replayWindow) {
+        debugPrint('InboundHandler: message $messageId from $from is older '
+            'than the replay window — dropped');
+        return;
+      }
+      final fresh = await _seen.record(messageId, now);
+      if (!fresh) return; // replay/duplicate
+    }
+
+    // Content dedupe: the sender may have delivered over BLE and relay both.
+    // Retained alongside the ledger so this stays correct when no ledger is
+    // wired (unit tests) and as a cheap same-session guard.
     final thread = await _messages.watchThread(from).first;
     if (thread.any((m) => m.id == messageId)) return;
 
-    final now = _now();
     DateTime? expiresAt;
     if (expiresInSec != null) {
       expiresAt = now.add(Duration(seconds: expiresInSec));

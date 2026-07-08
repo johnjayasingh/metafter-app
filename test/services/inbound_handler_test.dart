@@ -174,6 +174,53 @@ void main() {
       expect(messages.rows.length, 1);
       expect(receipts.length, 1);
     });
+
+    test('rejects a replay of a purged message id via the seen ledger',
+        () async {
+      final ledger = FakeSeenMessageLedger();
+      final h = InboundHandler(
+        requests: requests,
+        connections: connections,
+        messages: messages,
+        sendReceipt: (peerSub, messageId, status) async =>
+            receipts.add((peerSub, messageId, status)),
+        now: () => t0,
+        seen: ledger,
+      );
+
+      await h.handleMessage(
+          from: 'bob', messageId: 'm1', body: 'hi', sentAt: t0);
+      expect(messages.rows, hasLength(1));
+
+      // Simulate the disappearing-message purge: the row is gone from the
+      // thread, but the ledger still remembers the id.
+      messages.rows.clear();
+
+      await h.handleMessage(
+          from: 'bob', messageId: 'm1', body: 'hi', sentAt: t0);
+      expect(messages.rows, isEmpty, reason: 'replay must not resurrect');
+    });
+
+    test('rejects a message older than the replay freshness window', () async {
+      final ledger = FakeSeenMessageLedger();
+      final h = InboundHandler(
+        requests: requests,
+        connections: connections,
+        messages: messages,
+        now: () => t0,
+        seen: ledger,
+        replayWindow: const Duration(days: 7),
+      );
+
+      await h.handleMessage(
+          from: 'bob',
+          messageId: 'stale',
+          body: 'hi',
+          sentAt: t0.subtract(const Duration(days: 8)));
+
+      expect(messages.rows, isEmpty);
+      expect(ledger.seen, isEmpty, reason: 'stale ids are not even recorded');
+    });
   });
 
   group('handleReceipt / handleDisconnect', () {

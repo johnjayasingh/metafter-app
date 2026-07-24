@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -39,13 +40,31 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell>
     with SingleTickerProviderStateMixin {
-  static const _homeIndex = 1;
+  /// Deck axis — one continuous value spanning five settled states:
+  /// 0 = Discover full-screen · 1 = Discover parked (Home peeks right) ·
+  /// 2 = Home hub · 3 = Messages parked (Home peeks left) · 4 = Messages full.
+  static const _discoverFullIndex = 0;
+  static const _discoverIndex = 1;
+  static const _homeIndex = 2;
+  static const _messagesIndex = 3;
+  static const _messagesFullIndex = 4;
 
   /// Continuous carousel position — 0 = Discover, 1 = Home, 2 = Messages.
   final ValueNotifier<double> _pagePos =
       ValueNotifier<double>(_homeIndex.toDouble());
   late final AnimationController _pageAnim;
   int _page = _homeIndex;
+
+  /// Live query for the Messages card's header search (empty = show everything).
+  /// Owned here so the search icon in the Messages card header and the embedded
+  /// [AllMessagesScreen] share a single source of truth.
+  final ValueNotifier<String> _messagesQuery = ValueNotifier<String>('');
+
+  /// Stable embedded bodies — created once so the deck's per-tick side-card
+  /// rebuilds never remount their subtrees (single-listener streams inside).
+  static const Widget _discoverBody = DiscoverHistoryScreen(embedded: true);
+  late final Widget _messagesBody =
+      AllMessagesScreen(embedded: true, searchQuery: _messagesQuery);
 
   /// The listener attached to [_pageAnim] for the in-flight snap animation.
   /// Kept so it can be removed deterministically the moment the animation is
@@ -72,6 +91,7 @@ class _HomeShellState extends State<HomeShell>
   void dispose() {
     _pageAnim.dispose();
     _pagePos.dispose();
+    _messagesQuery.dispose();
     super.dispose();
   }
 
@@ -92,7 +112,11 @@ class _HomeShellState extends State<HomeShell>
     _pageAnim
       ..stop()
       ..reset();
-    final t = target.clamp(0, 2).toDouble();
+    final t = target.clamp(0, 4).toDouble();
+    // Leaving the Messages side entirely clears its header search. The search
+    // field UI resets when the card unmounts, so the shared query must reset
+    // in lockstep — otherwise a stale, invisible filter hides threads.
+    if (t < _messagesIndex) _messagesQuery.value = '';
     final anim = Tween<double>(begin: _pagePos.value, end: t).animate(
       CurvedAnimation(parent: _pageAnim, curve: Curves.easeOutCubic),
     );
@@ -240,54 +264,58 @@ class _HomeShellState extends State<HomeShell>
         final active = sessionState is SessionActive;
         final immersive = _page == _homeIndex && active;
         return Scaffold(
+          // Fills the thin status-bar gap / corner triangles behind the cards —
+          // black under the immersive Meet home, white otherwise.
           backgroundColor: immersive ? Colors.black : Colors.white,
           body: SafeArea(
             bottom: false,
-            child: Column(
-              children: [
-                ValueListenableBuilder<bool>(
-                  valueListenable: AppServices.I.settings.incognitoScan,
-                  builder: (context, incognito, _) => _SharedHeader(
-                    page: _page,
-                    immersive: immersive,
-                    incognito: incognito,
-                    // Advertising can't be hot-restarted mid-session, so the
-                    // visibility toggle is locked while active to avoid a
-                    // false "they can't see you" confirmation (finding [17]).
-                    sessionActive: active,
-                    onIncognito: _setIncognito,
-                    onPrev: () => _goToPage(_page - 1),
-                    onNext: () => _goToPage(_page + 1),
-                  ),
-                ),
-                _PageTitleStrip(
-                  position: _pagePos,
-                  titles: ['Discover', active ? 'Meet' : 'Home', 'Messages'],
-                  immersive: immersive,
-                ),
-                Expanded(
-                  child: _PeekCarousel(
-                    position: _pagePos,
-                    onDragStart: () {
-                      _detachPageListener();
-                      _pageAnim.stop();
-                    },
-                    onSnap: _goToPage,
-                    home: _DiscoverCard(
-                      photoPath: hasPhoto ? photo : null,
-                      sessionState: sessionState,
-                      pendingCount: _pendingCount,
-                      onStart: _startSession,
-                      onEnd: _endSession,
-                      onGear: _openSettings,
-                      onPersonTap: _openProfile,
-                      onOpenSheet: () => _openConnectSheet(context),
-                    ),
-                    discover: const DiscoverHistoryScreen(embedded: true),
-                    messages: const AllMessagesScreen(embedded: true),
-                  ),
-                ),
-              ],
+            child: _CardDeck(
+              position: _pagePos,
+              immersive: immersive,
+              onDragStart: () {
+                _detachPageListener();
+                _pageAnim.stop();
+              },
+              onSnap: _goToPage,
+              onHomeTap: () => _goToPage(_homeIndex),
+              // Home hub — the frontmost deck card. Carries its own header +
+              // peeking neighbour-title preview over the Home/Meet gradient.
+              home: _HomeCard(
+                position: _pagePos,
+                immersive: immersive,
+                active: active,
+                sessionState: sessionState,
+                photoPath: hasPhoto ? photo : null,
+                pendingCount: _pendingCount,
+                onIncognito: _setIncognito,
+                onPrev: () => _goToPage(_discoverIndex),
+                onNext: () => _goToPage(_messagesIndex),
+                onStart: _startSession,
+                onEnd: _endSession,
+                onGear: _openSettings,
+                onPersonTap: _openProfile,
+                onOpenSheet: () => _openConnectSheet(context),
+              ),
+              // Side pages slide in under the Home card; each lays out around
+              // the parked Home peek and can expand to a true full screen.
+              discoverBuilder: (expand) => _SideCard(
+                title: 'Discover',
+                chevron: _SideChevron.right,
+                expand: expand,
+                peekInsetFrac: 0.30,
+                onBack: () => _goToPage(_homeIndex),
+                onExpand: () => _goToPage(_discoverFullIndex),
+                child: _discoverBody,
+              ),
+              messagesBuilder: (expand) => _SideCard(
+                title: 'Messages',
+                chevron: _SideChevron.left,
+                expand: expand,
+                onBack: () => _goToPage(_homeIndex),
+                onExpand: () => _goToPage(_messagesFullIndex),
+                searchQuery: _messagesQuery,
+                child: _messagesBody,
+              ),
             ),
           ),
         );
@@ -296,39 +324,71 @@ class _HomeShellState extends State<HomeShell>
   }
 }
 
-// ─── Peek carousel ───────────────────────────────────────────────────────────
+// ─── Card deck ────────────────────────────────────────────────────────────────
 
-/// A three-page carousel where **Home** is a full-screen hub. Each tab is
-/// full-screen when settled; swiping slides the Discover (left) / Messages
-/// (right) panel fully over Home as a shadowed card while Home recedes behind
-/// it (scale + parallax + dim), so the neighbour only *peeks* mid-drag and
-/// commits to a full view once released past threshold.
-class _PeekCarousel extends StatefulWidget {
-  const _PeekCarousel({
+/// The five-position card deck (axis on [_HomeShellState]). **Home is always
+/// the frontmost card**: side pages slide in *underneath* it while Home
+/// shrinks toward the opposite edge and parks there as a persistent peek —
+/// backed by a grey "far page" ghost — the stacked-deck look of the demo.
+/// Dragging past a parked side page (or tapping its big title) expands it to
+/// a true full screen, sliding the peek stack away.
+class _CardDeck extends StatefulWidget {
+  const _CardDeck({
     required this.position,
+    required this.immersive,
     required this.home,
-    required this.discover,
-    required this.messages,
+    required this.discoverBuilder,
+    required this.messagesBuilder,
     required this.onDragStart,
     required this.onSnap,
+    required this.onHomeTap,
   });
 
-  final ValueNotifier<double> position; // 0 = Discover, 1 = Home, 2 = Messages
+  /// Continuous 0..4 deck axis (see [_HomeShellState]).
+  final ValueNotifier<double> position;
+
+  /// True while an active Meet session makes the settled Home immersive (dark).
+  final bool immersive;
   final Widget home;
-  final Widget discover;
-  final Widget messages;
+
+  /// Side pages are rebuilt each position tick with their current expansion
+  /// (0 = parked next to the peek, 1 = full-screen); their bodies stay stable
+  /// widget instances so subtree state is never remounted.
+  final Widget Function(double expand) discoverBuilder;
+  final Widget Function(double expand) messagesBuilder;
   final VoidCallback onDragStart;
   final ValueChanged<int> onSnap;
 
+  /// Tap on the parked Home peek — returns the deck to Home.
+  final VoidCallback onHomeTap;
+
   @override
-  State<_PeekCarousel> createState() => _PeekCarouselState();
+  State<_CardDeck> createState() => _CardDeckState();
 }
 
-class _PeekCarouselState extends State<_PeekCarousel> {
-  /// Inner-edge corner radius of a side panel while it is mid-slide.
+class _CardDeckState extends State<_CardDeck> {
+  /// Rounded corner radius shared by every card in the deck.
   static const double _cardRadius = 28;
 
-  double _startPos = 1;
+  /// Home card scale when parked as the edge peek (measured from the demo).
+  static const double _peekScale = 0.70;
+
+  /// Home card travel into its peek slot, as a fraction of width — leaves
+  /// ~24% of the card visible at the screen edge.
+  static const double _peekShift = 0.61;
+
+  /// Extra travel that slides the peek stack fully off-screen while a side
+  /// page expands to full-screen.
+  static const double _expandShift = 0.5;
+
+  /// The grey far-page ghost peeks out from behind Home by this much.
+  static const double _ghostShift = 0.06;
+
+  static const List<BoxShadow> _cardShadow = [
+    BoxShadow(color: Color(0x33000000), blurRadius: 22, offset: Offset(0, 4)),
+  ];
+
+  double _startPos = 2;
   double _startDx = 0;
 
   @override
@@ -345,7 +405,7 @@ class _PeekCarouselState extends State<_PeekCarousel> {
           },
           onHorizontalDragUpdate: (d) {
             final dx = d.globalPosition.dx - _startDx;
-            widget.position.value = (_startPos - dx / w).clamp(0.0, 2.0);
+            widget.position.value = (_startPos - dx / w).clamp(0.0, 4.0);
           },
           onHorizontalDragEnd: (d) {
             final v = d.primaryVelocity ?? 0;
@@ -353,71 +413,123 @@ class _PeekCarouselState extends State<_PeekCarousel> {
             final target = v < -350
                 ? p.ceil()
                 : (v > 350 ? p.floor() : p.round());
-            widget.onSnap(target.clamp(0, 2));
+            widget.onSnap(target.clamp(0, 4));
           },
           child: ValueListenableBuilder<double>(
             valueListenable: widget.position,
             builder: (context, p, _) {
-              // 0 at Home, 1 when a side panel fully covers it.
-              final t = (p - 1).abs().clamp(0.0, 1.0);
-              // Home drifts away from the entering panel for parallax depth.
-              final dir = p < 1.0 ? -1.0 : 1.0;
+              // 0 at Home · 1 when a side page is parked with the peek ·
+              // 2 when that side page has expanded to full-screen.
+              final t = (p - 2).abs();
+              final t1 = t.clamp(0.0, 1.0);
+              final expand = (t - 1).clamp(0.0, 1.0);
+              // Home parks right of Discover, left of Messages.
+              final dir = p < 2 ? 1.0 : -1.0;
+              final scale = 1.0 - (1.0 - _peekScale) * t1;
+              final tx = dir * w * (_peekShift * t1 + _expandShift * expand);
+              // The ghost fades in late so it never flashes mid-drag.
+              final ghostOpacity = ((t1 - 0.35) / 0.65).clamp(0.0, 1.0);
               return Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  // Home hub — full-screen base that recedes as a card behind
-                  // the sliding panel (scale + parallax + dim).
+                  // Backdrop behind every card — fills the corner notches.
+                  // Every deck layer is keyed: the Stack's child list changes
+                  // as layers toggle, and without keys Flutter's positional
+                  // child matching would hand the Home element to a side page
+                  // and remount Home (re-listening its single-listener
+                  // streams → "Stream has already been listened to").
                   Positioned.fill(
-                    child: Transform.translate(
-                      offset: Offset(dir * w * 0.06 * t, 0),
-                      child: Transform.scale(
-                        scale: 1.0 - 0.05 * t,
-                        child: ClipRRect(
-                          borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(28)),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              widget.home,
-                              if (t > 0)
-                                IgnorePointer(
-                                  child: ColoredBox(
-                                    color: Color.fromRGBO(0, 0, 0, 0.25 * t),
-                                  ),
+                    key: const ValueKey('deck-backdrop'),
+                    child: ColoredBox(
+                      color: widget.immersive && t < 0.5
+                          ? Colors.black
+                          : Colors.white,
+                    ),
+                  ),
+                  // Side pages slide in UNDER the Home card.
+                  if (p < 2)
+                    Positioned(
+                      key: const ValueKey('deck-discover'),
+                      top: 0,
+                      bottom: 0,
+                      width: w,
+                      left: -w * (p - 1).clamp(0.0, 1.0),
+                      child: _frame(
+                        widget.discoverBuilder((1 - p).clamp(0.0, 1.0)),
+                      ),
+                    ),
+                  if (p > 2)
+                    Positioned(
+                      key: const ValueKey('deck-messages'),
+                      top: 0,
+                      bottom: 0,
+                      width: w,
+                      left: w * (3 - p).clamp(0.0, 1.0),
+                      child: _frame(
+                        widget.messagesBuilder((p - 3).clamp(0.0, 1.0)),
+                      ),
+                    ),
+                  // Grey "far page" ghost — the deck's depth cue, peeking out
+                  // from behind the Home card toward the screen centre.
+                  if (ghostOpacity > 0)
+                    Positioned.fill(
+                      key: const ValueKey('deck-ghost'),
+                      child: IgnorePointer(
+                        child: Opacity(
+                          opacity: ghostOpacity,
+                          child: Transform.translate(
+                            offset: Offset(
+                                tx - dir * w * _ghostShift * t1, 0),
+                            child: Transform.scale(
+                              scale: scale * 1.04,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE4E4E4),
+                                  borderRadius:
+                                      BorderRadius.circular(_cardRadius),
+                                  boxShadow: _cardShadow,
                                 ),
-                            ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  // Home — always the frontmost card. Parked as the peek it
+                  // absorbs its own controls; a tap brings the deck Home.
+                  Positioned.fill(
+                    key: const ValueKey('deck-home'),
+                    child: Transform.translate(
+                      offset: Offset(tx, 0),
+                      child: Transform.scale(
+                        scale: scale,
+                        child: GestureDetector(
+                          onTap: t1 > 0.5 ? widget.onHomeTap : null,
+                          child: AbsorbPointer(
+                            absorbing: t1 > 0.15,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.vertical(
+                                  top: const Radius.circular(_cardRadius),
+                                  bottom:
+                                      Radius.circular(_cardRadius * t1),
+                                ),
+                                boxShadow: _cardShadow,
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.vertical(
+                                  top: const Radius.circular(_cardRadius),
+                                  bottom:
+                                      Radius.circular(_cardRadius * t1),
+                                ),
+                                child: widget.home,
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                  // Discover slides fully over from the left; its inner (right)
-                  // edge rounds mid-slide and squares off once it fully covers.
-                  if (p < 1.0)
-                    Positioned(
-                      top: 0,
-                      bottom: 0,
-                      left: -w * p,
-                      width: w,
-                      child: _panel(
-                        widget.discover,
-                        roundRight: true,
-                        radius: _cardRadius * p,
-                      ),
-                    ),
-                  // Messages slides fully over from the right.
-                  if (p > 1.0)
-                    Positioned(
-                      top: 0,
-                      bottom: 0,
-                      left: w * (2 - p),
-                      width: w,
-                      child: _panel(
-                        widget.messages,
-                        roundRight: false,
-                        radius: _cardRadius * (2 - p),
-                      ),
-                    ),
                 ],
               );
             },
@@ -427,27 +539,334 @@ class _PeekCarouselState extends State<_PeekCarousel> {
     );
   }
 
-  Widget _panel(
-    Widget child, {
-    required bool roundRight,
-    required double radius,
-  }) {
-    final br = roundRight
-        ? BorderRadius.horizontal(right: Radius.circular(radius))
-        : BorderRadius.horizontal(left: Radius.circular(radius));
+  /// Frame for the side pages: rounded top corners, drop shadow, clipping.
+  Widget _frame(Widget child) {
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: br,
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 22,
-            offset: Offset(0, 4),
+      decoration: const BoxDecoration(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(_cardRadius)),
+        boxShadow: _cardShadow,
+      ),
+      child: ClipRRect(
+        borderRadius:
+            const BorderRadius.vertical(top: Radius.circular(_cardRadius)),
+        child: child,
+      ),
+    );
+  }
+}
+
+// ─── Home card ────────────────────────────────────────────────────────────────
+
+/// The Home hub card: the shared header + peeking neighbour-title preview
+/// sitting on the white (or, mid-session, black) card top, over the Home/Meet
+/// gradient body.
+class _HomeCard extends StatelessWidget {
+  const _HomeCard({
+    required this.position,
+    required this.immersive,
+    required this.active,
+    required this.sessionState,
+    required this.photoPath,
+    required this.pendingCount,
+    required this.onIncognito,
+    required this.onPrev,
+    required this.onNext,
+    required this.onStart,
+    required this.onEnd,
+    required this.onGear,
+    required this.onPersonTap,
+    required this.onOpenSheet,
+  });
+
+  final ValueListenable<double> position;
+  final bool immersive;
+  final bool active;
+  final SessionState sessionState;
+  final String? photoPath;
+  final Stream<int> pendingCount;
+  final ValueChanged<bool> onIncognito;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+  final VoidCallback onStart;
+  final VoidCallback onEnd;
+  final VoidCallback onGear;
+  final void Function(NearbyPeer) onPersonTap;
+  final VoidCallback onOpenSheet;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: immersive ? Colors.black : Colors.white,
+      child: Column(
+        children: [
+          ValueListenableBuilder<bool>(
+            valueListenable: AppServices.I.settings.incognitoScan,
+            builder: (context, incognito, _) => _SharedHeader(
+              immersive: immersive,
+              incognito: incognito,
+              // Advertising can't be hot-restarted mid-session, so the
+              // visibility toggle is locked while active to avoid a false
+              // "they can't see you" confirmation (finding [17]).
+              sessionActive: active,
+              onIncognito: onIncognito,
+              onPrev: onPrev,
+              onNext: onNext,
+            ),
+          ),
+          _PageTitleStrip(
+            position: position,
+            titles: ['Discover', active ? 'Meet' : 'Home', 'Messages'],
+            immersive: immersive,
+          ),
+          Expanded(
+            child: _DiscoverCard(
+              photoPath: photoPath,
+              sessionState: sessionState,
+              pendingCount: pendingCount,
+              onStart: onStart,
+              onEnd: onEnd,
+              onGear: onGear,
+              onPersonTap: onPersonTap,
+              onOpenSheet: onOpenSheet,
+            ),
           ),
         ],
       ),
-      child: ClipRRect(borderRadius: br, child: child),
+    );
+  }
+}
+
+// ─── Side cards (Discover / Messages) ────────────────────────────────────────
+
+/// Which side the single "back to Home" chevron sits on / points toward.
+enum _SideChevron { left, right }
+
+/// A side page card. Parked beside the Home peek (`expand` 0) it cedes the
+/// peek side of the screen to the stack — big title and body inset away from
+/// it. Expanded (`expand` 1) it is a true full-screen page whose big title has
+/// morphed into a compact `‹ Title` row (as in the demo's full Messages view).
+class _SideCard extends StatelessWidget {
+  const _SideCard({
+    required this.title,
+    required this.chevron,
+    required this.expand,
+    required this.onBack,
+    required this.onExpand,
+    required this.child,
+    this.peekInsetFrac = 0.36,
+    this.searchQuery,
+  });
+
+  final String title;
+  final _SideChevron chevron;
+
+  /// 0 = parked layout · 1 = full-screen layout (continuous mid-animation).
+  final double expand;
+  final VoidCallback onBack;
+
+  /// Tap on the big title — expands this page to full-screen.
+  final VoidCallback onExpand;
+  final Widget child;
+
+  /// When non-null the expanded header shows a search icon bound to this
+  /// notifier (Messages only).
+  final ValueNotifier<String>? searchQuery;
+
+  /// Fraction of the width the parked layout cedes to the Home peek stack
+  /// (measured from the demo — slightly wider on Messages than Discover).
+  final double peekInsetFrac;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final inset = c.maxWidth * peekInsetFrac * (1.0 - expand);
+        final peekRight = chevron == _SideChevron.right;
+        return ColoredBox(
+          color: Colors.white,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SideHeader(
+                title: title,
+                chevron: chevron,
+                expand: expand,
+                inset: inset,
+                onBack: onBack,
+                onExpand: onExpand,
+                searchQuery: searchQuery,
+              ),
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: peekRight ? 0 : inset,
+                    right: peekRight ? inset : 0,
+                  ),
+                  child: child,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SideHeader extends StatefulWidget {
+  const _SideHeader({
+    required this.title,
+    required this.chevron,
+    required this.expand,
+    required this.inset,
+    required this.onBack,
+    required this.onExpand,
+    this.searchQuery,
+  });
+
+  final String title;
+  final _SideChevron chevron;
+  final double expand;
+
+  /// Horizontal room ceded to the Home peek stack (0 when expanded).
+  final double inset;
+  final VoidCallback onBack;
+  final VoidCallback onExpand;
+  final ValueNotifier<String>? searchQuery;
+
+  @override
+  State<_SideHeader> createState() => _SideHeaderState();
+}
+
+class _SideHeaderState extends State<_SideHeader> {
+  final TextEditingController _search = TextEditingController();
+  bool _searchOpen = false;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _searchOpen = !_searchOpen;
+      if (!_searchOpen) {
+        _search.clear();
+        widget.searchQuery?.value = '';
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final e = widget.expand;
+    final left = widget.chevron == _SideChevron.left;
+    final hasSearch = widget.searchQuery != null;
+
+    // The big parked title (below the chevron, inset from the peek) morphs
+    // into a compact `‹ Title` row as the page expands to full-screen.
+    final titleSize = lerpDouble(44, 20, e)!;
+    final titleTop = lerpDouble(52, 11, e)!;
+    final titleLeft =
+        left ? lerpDouble(widget.inset + 20, 46, e)! : 20.0;
+
+    final header = SizedBox(
+      height: lerpDouble(112, 46, e)!,
+      width: double.infinity,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            top: 0,
+            left: left ? 0 : null,
+            right: left ? null : 0,
+            child: IconButton(
+              onPressed: widget.onBack,
+              iconSize: 22,
+              icon: Icon(
+                left
+                    ? Icons.arrow_back_ios_new_rounded
+                    : Icons.arrow_forward_ios_rounded,
+                color: AppColors.brandRed,
+              ),
+            ),
+          ),
+          // Search appears only once the page has expanded (demo behaviour).
+          if (hasSearch)
+            Positioned(
+              top: 0,
+              right: 4,
+              child: Opacity(
+                opacity: e,
+                child: IgnorePointer(
+                  ignoring: e < 0.5,
+                  child: IconButton(
+                    onPressed: _toggleSearch,
+                    iconSize: 24,
+                    icon: Icon(
+                      _searchOpen
+                          ? Icons.close_rounded
+                          : Icons.search_rounded,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            top: titleTop,
+            left: titleLeft,
+            child: GestureDetector(
+              onTap: e < 0.5 ? widget.onExpand : null,
+              child: Text(
+                widget.title,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.visible,
+                style: TextStyle(
+                  fontSize: titleSize,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                  color: Colors.black,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (!(hasSearch && _searchOpen)) return header;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        header,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+          child: TextField(
+            controller: _search,
+            autofocus: true,
+            onChanged: (v) => widget.searchQuery?.value = v,
+            style: const TextStyle(fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Search messages…',
+              hintStyle:
+                  const TextStyle(fontSize: 14, color: Color(0xFFAAAAAA)),
+              prefixIcon: const Icon(Icons.search_rounded,
+                  size: 20, color: Color(0xFFAAAAAA)),
+              filled: true,
+              fillColor: const Color(0xFFF5F5F5),
+              contentPadding:
+                  const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -456,7 +875,6 @@ class _PeekCarouselState extends State<_PeekCarousel> {
 
 class _SharedHeader extends StatelessWidget {
   const _SharedHeader({
-    required this.page,
     required this.immersive,
     required this.incognito,
     required this.sessionActive,
@@ -465,7 +883,6 @@ class _SharedHeader extends StatelessWidget {
     required this.onNext,
   });
 
-  final int page;
   final bool immersive;
   final bool incognito;
 
@@ -483,7 +900,7 @@ class _SharedHeader extends StatelessWidget {
         children: [
           _ArrowButton(
             icon: Icons.arrow_back_ios_new_rounded,
-            enabled: page > 0,
+            enabled: true,
             onTap: onPrev,
           ),
           const Expanded(
@@ -504,7 +921,7 @@ class _SharedHeader extends StatelessWidget {
           const SizedBox(width: 4),
           _ArrowButton(
             icon: Icons.arrow_forward_ios_rounded,
-            enabled: page < 2,
+            enabled: true,
             onTap: onNext,
           ),
         ],
@@ -556,7 +973,10 @@ class _PageTitleStrip extends StatelessWidget {
       height: 58,
       child: ValueListenableBuilder<double>(
         valueListenable: position,
-        builder: (context, page, _) {
+        builder: (context, raw, _) {
+          // The deck axis is 0..4; the strip's three titles live on the
+          // 1..3 span (Discover · Home · Messages) — shift into title space.
+          final page = (raw - 1.0).clamp(0.0, 2.0);
           return LayoutBuilder(
             builder: (context, c) {
               final spacing = c.maxWidth * 0.46;
@@ -685,12 +1105,16 @@ class _DiscoverCard extends StatelessWidget {
         return ValueListenableBuilder<bool>(
           valueListenable: AppServices.I.settings.reduceMotion,
           builder: (context, reduceMotion, _) {
-            // A2: red ⇄ green gradient cross-fade (~600 ms).
+            // A2: red ⇄ green gradient cross-fade (~600 ms). Rounded top so the
+            // gradient reads as a card sitting below the white header zone.
             return AnimatedContainer(
               duration: const Duration(milliseconds: 600),
               curve: Curves.easeInOut,
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 gradient: active ? _meetGradient : _idleGradient,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(28)),
               ),
               child: active
                   ? _buildActive(context, sessionState as SessionActive,

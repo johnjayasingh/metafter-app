@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/domain/models.dart';
@@ -11,11 +12,20 @@ import 'chat_screen.dart';
 /// `AppServices.I.messages`, with search, swipe-to-archive (A10) and a
 /// collapsible Archived section at the bottom.
 class AllMessagesScreen extends StatefulWidget {
-  const AllMessagesScreen({super.key, this.embedded = false});
+  const AllMessagesScreen({
+    super.key,
+    this.embedded = false,
+    this.searchQuery,
+  });
 
   /// When `true`, render the body only (no Scaffold/AppBar) so the screen can
-  /// be hosted inside the swipeable [HomeShell] under its shared header.
+  /// be hosted inside the swipeable [HomeShell] as a self-contained card.
   final bool embedded;
+
+  /// Embedded search source. When provided (the Messages card's header search
+  /// icon drives it), the list filters on this and the screen renders no search
+  /// field of its own.
+  final ValueListenable<String>? searchQuery;
 
   @override
   State<AllMessagesScreen> createState() => _AllMessagesScreenState();
@@ -43,9 +53,9 @@ class _AllMessagesScreenState extends State<AllMessagesScreen> {
     super.dispose();
   }
 
-  List<ThreadSummary> _filter(List<ThreadSummary> threads) {
-    if (_query.isEmpty) return threads;
-    final q = _query.toLowerCase();
+  List<ThreadSummary> _filter(List<ThreadSummary> threads, String query) {
+    if (query.isEmpty) return threads;
+    final q = query.toLowerCase();
     return threads
         .where((t) =>
             t.card.name.toLowerCase().contains(q) ||
@@ -86,13 +96,13 @@ class _AllMessagesScreenState extends State<AllMessagesScreen> {
         ),
       );
 
-  Widget _body() => StreamBuilder<List<ThreadSummary>>(
+  Widget _body(String query) => StreamBuilder<List<ThreadSummary>>(
         stream: _chats,
         builder: (context, chatsSnap) => StreamBuilder<List<ThreadSummary>>(
           stream: _archived,
           builder: (context, archivedSnap) {
-            final chats = _filter(chatsSnap.data ?? const []);
-            final archived = _filter(archivedSnap.data ?? const []);
+            final chats = _filter(chatsSnap.data ?? const [], query);
+            final archived = _filter(archivedSnap.data ?? const [], query);
 
             if (chats.isEmpty && archived.isEmpty) {
               return Center(
@@ -103,9 +113,9 @@ class _AllMessagesScreenState extends State<AllMessagesScreen> {
                         size: 56, color: Colors.grey.shade300),
                     const SizedBox(height: 12),
                     Text(
-                      _query.isEmpty
+                      query.isEmpty
                           ? 'No messages yet'
-                          : 'No results for "$_query"',
+                          : 'No results for "$query"',
                       style: const TextStyle(
                           fontSize: 15, color: Color(0xFF8A8A8A)),
                     ),
@@ -152,14 +162,17 @@ class _AllMessagesScreenState extends State<AllMessagesScreen> {
   @override
   Widget build(BuildContext context) {
     if (widget.embedded) {
+      // Search lives in the Messages card header (HomeShell); filter on the
+      // query it drives, and render no field of our own.
+      final query = widget.searchQuery;
       return ColoredBox(
         color: Colors.white,
-        child: Column(
-          children: [
-            _searchField(),
-            Expanded(child: _body()),
-          ],
-        ),
+        child: query == null
+            ? _body(_query)
+            : ValueListenableBuilder<String>(
+                valueListenable: query,
+                builder: (context, q, _) => _body(q),
+              ),
       );
     }
 
@@ -187,7 +200,7 @@ class _AllMessagesScreenState extends State<AllMessagesScreen> {
           child: _searchField(),
         ),
       ),
-      body: _body(),
+      body: _body(_query),
     );
   }
 }

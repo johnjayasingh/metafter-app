@@ -107,31 +107,40 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
                   ),
                 ),
               ),
-              _ViewToggle(
-                grid: _grid,
-                onChanged: (v) => setState(() => _grid = v),
-              ),
-              const SizedBox(width: 12),
-              IconButton(
-                icon: const Icon(Icons.calendar_today_outlined,
-                    color: Colors.black, size: 22),
-                onPressed: _pickDay,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
+              // Embedded in the Home deck the demo keeps the chrome minimal —
+              // no view toggle or calendar button (day-picking moves to the
+              // tappable date band below).
+              if (!widget.embedded) ...[
+                _ViewToggle(
+                  grid: _grid,
+                  onChanged: (v) => setState(() => _grid = v),
+                ),
+                const SizedBox(width: 12),
+                IconButton(
+                  icon: const Icon(Icons.calendar_today_outlined,
+                      color: Colors.black, size: 22),
+                  onPressed: _pickDay,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
             ],
           ),
         ),
-        Container(
-          width: double.infinity,
-          color: AppColors.brandRedSoft,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          child: Text(
-            TimeFormat.dateBand(_day),
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: AppColors.brandRed,
+        GestureDetector(
+          onTap: _pickDay,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            width: double.infinity,
+            color: AppColors.brandRedSoft,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            child: Text(
+              TimeFormat.dateBand(_day),
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: AppColors.brandRed,
+              ),
             ),
           ),
         ),
@@ -145,7 +154,9 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
                 final rows = snapshot.data;
                 if (rows == null) return const SizedBox.shrink();
                 if (rows.isEmpty) return const _EmptyState();
-                return _grid
+                // The grid/carousel view is a non-embedded affordance only.
+                final grid = _grid && !widget.embedded;
+                return grid
                     ? _buildCarousel(rows, use24h)
                     : _buildList(rows, use24h);
               },

@@ -49,11 +49,14 @@ class CognitoAuthService {
 
   // --- Identity helpers ----------------------------------------------------
 
-  /// Normalizes a phone number to E.164 digits and derives the Cognito
-  /// username (never email- or phone-format, so it can't clash with aliases).
+  /// Normalizes a phone number to E.164 digits and derives a deterministic
+  /// synthetic email. The pool is configured with `UsernameAttributes`
+  /// (email + phone_number), so the Cognito username must itself be an
+  /// email- or phone-formatted string — we use the synthetic email as the
+  /// username, and Cognito assigns an internal opaque `sub` behind it.
   String _digits(String e164) => e164.replaceAll(RegExp(r'[^0-9]'), '');
-  String _usernameFor(String e164) => 'ph${_digits(e164)}';
   String _syntheticEmailFor(String e164) => 'ph${_digits(e164)}@phone.metafter.app';
+  String _usernameFor(String e164) => _syntheticEmailFor(e164);
 
   /// Generates a throwaway password that satisfies the pool policy
   /// (min 8, upper + lower + digit). It is immediately discarded.

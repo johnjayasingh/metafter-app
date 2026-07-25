@@ -37,24 +37,36 @@ class MockData {
   static const String demoPrefix = 'demo-';
 
   static ProfileCard _card(String id, String name, String designation,
-          String company) =>
+          String company, [String intro = '']) =>
       ProfileCard(
         sub: '$demoPrefix$id',
         name: name,
         designation: designation,
         company: company,
+        intro: intro,
       );
 
   /// Today's crossed-paths timeline, exactly as in the prototype.
   static List<Encounter> demoEncounters() {
     final now = DateTime.now();
     DateTime at(int h, int m) => DateTime(now.year, now.month, now.day, h, m);
+    const intros = {
+      'Koby Stone':
+          'Engineering leader passionate about teams that ship delightful, '
+              'reliable products',
+      'Luna Ray':
+          'I am a brand sales person who focuses on clarity and emotional '
+              'connections of clients',
+      'Owen Hill':
+          'Sales professional helping companies find tools their teams '
+              'actually love',
+    };
     Encounter e(String id, String name, String designation, String company,
             DateTime seen) =>
         Encounter(
           id: '$demoPrefix$id',
           peerEid: '$demoPrefix$id',
-          card: _card(id, name, designation, company),
+          card: _card(id, name, designation, company, intros[name] ?? ''),
           firstSeen: seen,
           lastSeen: seen,
           meters: 2,

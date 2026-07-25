@@ -71,6 +71,10 @@ class _HomeShellState extends State<HomeShell>
   /// standalone chrome (view toggle, calendar button) per the design.
   final ValueNotifier<bool> _discoverFull = ValueNotifier<bool>(false);
 
+  /// Discover's list ⟷ card-deck state; the header toggle drives it and the
+  /// embedded body listens.
+  final ValueNotifier<bool> _discoverGrid = ValueNotifier<bool>(false);
+
   void _syncRowSwipe() {
     final v = _pagePos.value >= 3.7;
     if (_messagesRowSwipe.value != v) _messagesRowSwipe.value = v;
@@ -83,6 +87,7 @@ class _HomeShellState extends State<HomeShell>
   late final Widget _discoverBody = DiscoverHistoryScreen(
     embedded: true,
     fullChrome: _discoverFull,
+    gridMode: _discoverGrid,
   );
   late final Widget _messagesBody = AllMessagesScreen(
     embedded: true,
@@ -122,6 +127,7 @@ class _HomeShellState extends State<HomeShell>
     _messagesQuery.dispose();
     _messagesRowSwipe.dispose();
     _discoverFull.dispose();
+    _discoverGrid.dispose();
     super.dispose();
   }
 
@@ -337,6 +343,7 @@ class _HomeShellState extends State<HomeShell>
                 peekInsetFrac: 0.26,
                 onBack: () => _goToPage(_homeIndex),
                 onExpand: () => _goToPage(_discoverFullIndex),
+                trailing: DiscoverViewToggle(gridMode: _discoverGrid),
                 child: _discoverBody,
               ),
               messagesBuilder: (expand) => _SideCard(
@@ -747,6 +754,7 @@ class _SideCard extends StatelessWidget {
     required this.onExpand,
     required this.child,
     this.peekInsetFrac = 0.36,
+    this.trailing,
   });
 
   final String title;
@@ -763,6 +771,10 @@ class _SideCard extends StatelessWidget {
   /// Fraction of the width the parked layout cedes to the Home peek stack
   /// (measured from the demo — slightly wider on Messages than Discover).
   final double peekInsetFrac;
+
+  /// Optional title-row action (design: Discover's list/grid toggle),
+  /// shown only once the page has expanded to full screen.
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -782,6 +794,7 @@ class _SideCard extends StatelessWidget {
                 inset: inset,
                 onBack: onBack,
                 onExpand: onExpand,
+                trailing: trailing,
               ),
               Expanded(
                 child: Padding(
@@ -808,6 +821,7 @@ class _SideHeader extends StatelessWidget {
     required this.inset,
     required this.onBack,
     required this.onExpand,
+    this.trailing,
   });
 
   final String title;
@@ -818,6 +832,7 @@ class _SideHeader extends StatelessWidget {
   final double inset;
   final VoidCallback onBack;
   final VoidCallback onExpand;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -829,14 +844,15 @@ class _SideHeader extends StatelessWidget {
     // the design's compact `‹ Title` app-bar row — 20pt beside a LEFT back
     // chevron (Discover's parked chevron sits right and hands over to a
     // left one as the page fills the screen).
-    final titleSize = lerpDouble(43, 20, e)!;
-    final titleTop = lerpDouble(164, 13, e)!;
+    // Figma full view: 18pt SemiBold title, cap-top ~70 (box ~65), left 56.
+    final titleSize = lerpDouble(43, 18, e)!;
+    final titleTop = lerpDouble(164, 65, e)!;
     final titleLeft = left
         ? lerpDouble(inset + 20, 56, e)!
         : lerpDouble(20, 56, e)!;
 
     return SizedBox(
-      height: lerpDouble(228, 48, e)!,
+      height: lerpDouble(228, 108, e)!,
       width: double.infinity,
       child: Stack(
         clipBehavior: Clip.none,
@@ -844,7 +860,7 @@ class _SideHeader extends StatelessWidget {
           // Left back chevron: always present on the Messages side; on the
           // Discover side it fades in as the page expands.
           Positioned(
-            top: 0,
+            top: lerpDouble(0, 52, e)!,
             left: 0,
             child: Opacity(
               opacity: left ? 1.0 : e,
@@ -879,6 +895,15 @@ class _SideHeader extends StatelessWidget {
                     ),
                   ),
                 ),
+              ),
+            ),
+          if (trailing != null)
+            Positioned(
+              top: lerpDouble(0, 58, e)!,
+              right: 12,
+              child: Opacity(
+                opacity: e,
+                child: IgnorePointer(ignoring: e < 0.5, child: trailing),
               ),
             ),
           Positioned(

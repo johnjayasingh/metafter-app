@@ -410,7 +410,7 @@ class _CardDeckState extends State<_CardDeck> {
   static const double _expandShift = 0.5;
 
   /// The grey far-page ghost peeks out from behind Home by this much.
-  static const double _ghostShift = 0.06;
+  static const double _ghostShift = 0.09;
 
   /// Tight, downward-biased shadows — in the demo the stack's shadow reads
   /// only along the cards' sides, with no halo above the top edge.
@@ -532,12 +532,12 @@ class _CardDeckState extends State<_CardDeck> {
                             offset: Offset(
                                 tx - dir * w * _ghostShift * t1, ty),
                             child: Transform.scale(
-                              scale: scale * 1.02,
+                              scale: scale * 0.9,
                               child: DecoratedBox(
                                 // A white card, like the demo — it reads grey
                                 // only where the Home card's shadow falls.
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF6F6F6),
+                                  color: const Color(0xFFF8F8F8),
                                   borderRadius:
                                       BorderRadius.circular(radius),
                                   boxShadow: _cardShadow,

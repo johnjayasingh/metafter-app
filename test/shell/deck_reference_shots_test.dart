@@ -224,5 +224,21 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
     await shot('p4.0-messages-full'); // demo f0097
+
+    // ── Back home, then Discover expanded to full (design's full Discover:
+    // compact `‹ Discover` header with view toggle + calendar + pills) ──
+    await tester.tapAt(const Offset(28, 24)); // back chevron
+    await tester.pumpAndSettle();
+    gesture = await tester.startGesture(const Offset(196, 500));
+    await dragHold(gesture, 24);
+    await dragHold(gesture, _logicalW);
+    await gesture.up();
+    await tester.pumpAndSettle(); // parked Discover
+    gesture = await tester.startGesture(const Offset(150, 500));
+    await dragHold(gesture, 24);
+    await dragHold(gesture, _logicalW);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    await shot('p0.0-discover-full');
   });
 }

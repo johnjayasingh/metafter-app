@@ -6,7 +6,11 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
-      fontFamily: GoogleFonts.instrumentSans().fontFamily,
+      // The BUNDLED family (pubspec fonts:), not
+      // GoogleFonts.instrumentSans().fontFamily — that returns the runtime
+      // variant name ('InstrumentSans_regular'), which silently falls back
+      // to the platform font whenever the runtime fetch is unavailable.
+      fontFamily: 'InstrumentSans',
       colorScheme: ColorScheme.light(
         primary: AppColors.primaryGreen,
         secondary: AppColors.primaryMint,

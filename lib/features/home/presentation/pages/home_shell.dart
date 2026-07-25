@@ -50,8 +50,9 @@ class _HomeShellState extends State<HomeShell>
   static const _messagesFullIndex = 4;
 
   /// Continuous carousel position — 0 = Discover, 1 = Home, 2 = Messages.
-  final ValueNotifier<double> _pagePos =
-      ValueNotifier<double>(_homeIndex.toDouble());
+  final ValueNotifier<double> _pagePos = ValueNotifier<double>(
+    _homeIndex.toDouble(),
+  );
   late final AnimationController _pageAnim;
   int _page = _homeIndex;
 
@@ -66,14 +67,23 @@ class _HomeShellState extends State<HomeShell>
   /// gesture arena and archive the thread instead.
   final ValueNotifier<bool> _messagesRowSwipe = ValueNotifier<bool>(false);
 
+  /// True once the Discover page is (nearly) full-screen — unlocks its
+  /// standalone chrome (view toggle, calendar button) per the design.
+  final ValueNotifier<bool> _discoverFull = ValueNotifier<bool>(false);
+
   void _syncRowSwipe() {
     final v = _pagePos.value >= 3.7;
     if (_messagesRowSwipe.value != v) _messagesRowSwipe.value = v;
+    final d = _pagePos.value <= 0.3;
+    if (_discoverFull.value != d) _discoverFull.value = d;
   }
 
   /// Stable embedded bodies — created once so the deck's per-tick side-card
   /// rebuilds never remount their subtrees (single-listener streams inside).
-  static const Widget _discoverBody = DiscoverHistoryScreen(embedded: true);
+  late final Widget _discoverBody = DiscoverHistoryScreen(
+    embedded: true,
+    fullChrome: _discoverFull,
+  );
   late final Widget _messagesBody = AllMessagesScreen(
     embedded: true,
     searchQuery: _messagesQuery,
@@ -111,6 +121,7 @@ class _HomeShellState extends State<HomeShell>
     _pagePos.dispose();
     _messagesQuery.dispose();
     _messagesRowSwipe.dispose();
+    _discoverFull.dispose();
     super.dispose();
   }
 
@@ -136,9 +147,10 @@ class _HomeShellState extends State<HomeShell>
     // field UI resets when the card unmounts, so the shared query must reset
     // in lockstep — otherwise a stale, invisible filter hides threads.
     if (t < _messagesIndex) _messagesQuery.value = '';
-    final anim = Tween<double>(begin: _pagePos.value, end: t).animate(
-      CurvedAnimation(parent: _pageAnim, curve: Curves.easeOutCubic),
-    );
+    final anim = Tween<double>(
+      begin: _pagePos.value,
+      end: t,
+    ).animate(CurvedAnimation(parent: _pageAnim, curve: Curves.easeOutCubic));
     // Drive from the controller (not the tween) so the listener can be
     // removed later without holding the tween instance.
     void listener() => _pagePos.value = anim.value;
@@ -170,10 +182,7 @@ class _HomeShellState extends State<HomeShell>
     final error = await AppServices.I.session.start();
     if (!mounted || error == null) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: AppColors.brandRed,
-        content: Text(error),
-      ),
+      SnackBar(backgroundColor: AppColors.brandRed, content: Text(error)),
     );
   }
 
@@ -182,8 +191,9 @@ class _HomeShellState extends State<HomeShell>
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('End session?'),
-        content:
-            const Text('You will stop being discoverable to people nearby.'),
+        content: const Text(
+          'You will stop being discoverable to people nearby.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -261,15 +271,18 @@ class _HomeShellState extends State<HomeShell>
   void _openProfile(NearbyPeer peer) {
     final card = peer.card;
     if (card == null) return; // card not read yet — nothing to show
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => NearbyPersonProfileScreen(card: card, meters: peer.meters),
-    ));
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            NearbyPersonProfileScreen(card: card, meters: peer.meters),
+      ),
+    );
   }
 
   void _openSettings() {
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => const ProfileSettingsScreen(),
-    ));
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ProfileSettingsScreen()),
+    );
   }
 
   @override
@@ -332,7 +345,6 @@ class _HomeShellState extends State<HomeShell>
                 expand: expand,
                 onBack: () => _goToPage(_homeIndex),
                 onExpand: () => _goToPage(_messagesFullIndex),
-                searchQuery: _messagesQuery,
                 child: _messagesBody,
               ),
             ),
@@ -389,12 +401,13 @@ class _CardDeckState extends State<_CardDeck> {
   /// Rounded corner radius shared by every card in the deck.
   static const double _cardRadius = 28;
 
-  /// Home card scale when parked as the edge peek (measured from the demo).
-  static const double _peekScale = 0.65;
+  /// Home card scale when parked as the edge peek (measured from the demo:
+  /// the parked card is ~70% of the screen).
+  static const double _peekScale = 0.72;
 
-  /// Home card travel into its peek slot, as a fraction of width — leaves
-  /// ~24% of the card visible at the screen edge.
-  static const double _peekShift = 0.585;
+  /// Home card travel into its peek slot, as a fraction of width — parks the
+  /// card's left edge at ~75% of the screen width (demo f0023).
+  static const double _peekShift = 0.615;
 
   /// Side pages barely travel — they sit at their parked position with this
   /// small parallax offset while the Home card does the full drag distance
@@ -411,6 +424,10 @@ class _CardDeckState extends State<_CardDeck> {
 
   /// The grey far-page ghost peeks out from behind Home by this much.
   static const double _ghostShift = 0.09;
+
+  /// Parked card top gap below the safe area (demo: the peek's top edge
+  /// sits ~58pt under the status region — higher than centred scaling).
+  static const double _peekTopGap = 58;
 
   /// Tight, downward-biased shadows — in the demo the stack's shadow reads
   /// only along the cards' sides, with no halo above the top edge.
@@ -461,11 +478,12 @@ class _CardDeckState extends State<_CardDeck> {
               // The card scales down but its corners must READ as the same
               // radius as the full-screen card (demo peek stays round) —
               // compensate the layout radius for the visual scale.
-              final radius = _cardRadius / scale;
-              // SafeArea shifts the deck down; nudge the parked peek back up
-              // so its top lands where the demo's does.
-              final topPad = MediaQuery.of(context).padding.top;
-              final ty = -topPad * (1.0 - scale) * t1;
+              final vRadius = lerpDouble(_cardRadius, 36, t1)!;
+              final radius = vRadius / scale;
+              final ghostRadius = vRadius / (scale * 0.9);
+              // Centred scaling would drop the parked card too low — lift it
+              // so its top sits [_peekTopGap] below the deck top (demo).
+              final ty = t1 * (_peekTopGap - (1.0 - scale) / 2.0 * c.maxHeight);
               // The ghost fades in late so it never flashes mid-drag.
               final ghostOpacity = ((t1 - 0.35) / 0.65).clamp(0.0, 1.0);
               return Stack(
@@ -498,8 +516,7 @@ class _CardDeckState extends State<_CardDeck> {
                       width: w,
                       left: -w * _sideParallax * (p - 1).clamp(0.0, 1.0),
                       child: Opacity(
-                        opacity:
-                            1.0 - _sideFade * (p - 1).clamp(0.0, 1.0),
+                        opacity: 1.0 - _sideFade * (p - 1).clamp(0.0, 1.0),
                         child: _frame(
                           widget.discoverBuilder((1 - p).clamp(0.0, 1.0)),
                         ),
@@ -513,8 +530,7 @@ class _CardDeckState extends State<_CardDeck> {
                       width: w,
                       left: w * _sideParallax * (3 - p).clamp(0.0, 1.0),
                       child: Opacity(
-                        opacity:
-                            1.0 - _sideFade * (3 - p).clamp(0.0, 1.0),
+                        opacity: 1.0 - _sideFade * (3 - p).clamp(0.0, 1.0),
                         child: _frame(
                           widget.messagesBuilder((p - 3).clamp(0.0, 1.0)),
                         ),
@@ -529,18 +545,18 @@ class _CardDeckState extends State<_CardDeck> {
                         child: Opacity(
                           opacity: ghostOpacity,
                           child: Transform.translate(
-                            offset: Offset(
-                                tx - dir * w * _ghostShift * t1, ty),
+                            offset: Offset(tx - dir * w * _ghostShift * t1, ty),
                             child: Transform.scale(
                               scale: scale * 0.9,
                               child: DecoratedBox(
-                                // A white card, like the demo — it reads grey
-                                // only where the Home card's shadow falls.
+                                // Figma "Rectangle 3593": #ACACAC at 50%,
+                                // radius 36 — a translucent grey slab with
+                                // no shadow of its own.
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF8F8F8),
-                                  borderRadius:
-                                      BorderRadius.circular(radius),
-                                  boxShadow: _cardShadow,
+                                  color: const Color(0x80ACACAC),
+                                  borderRadius: BorderRadius.circular(
+                                    ghostRadius,
+                                  ),
                                 ),
                               ),
                             ),
@@ -598,8 +614,9 @@ class _CardDeckState extends State<_CardDeck> {
         boxShadow: _cardShadow,
       ),
       child: ClipRRect(
-        borderRadius:
-            const BorderRadius.vertical(top: Radius.circular(_cardRadius)),
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(_cardRadius),
+        ),
         child: child,
       ),
     );
@@ -685,7 +702,8 @@ class _HomeCard extends StatelessWidget {
                           ? const Color(0xFF2A2A2A)
                           : const Color(0xFFECECEC),
                       borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(24)),
+                        top: Radius.circular(24),
+                      ),
                     ),
                   ),
                 ),
@@ -729,7 +747,6 @@ class _SideCard extends StatelessWidget {
     required this.onExpand,
     required this.child,
     this.peekInsetFrac = 0.36,
-    this.searchQuery,
   });
 
   final String title;
@@ -742,10 +759,6 @@ class _SideCard extends StatelessWidget {
   /// Tap on the big title — expands this page to full-screen.
   final VoidCallback onExpand;
   final Widget child;
-
-  /// When non-null the expanded header shows a search icon bound to this
-  /// notifier (Messages only).
-  final ValueNotifier<String>? searchQuery;
 
   /// Fraction of the width the parked layout cedes to the Home peek stack
   /// (measured from the demo — slightly wider on Messages than Discover).
@@ -769,7 +782,6 @@ class _SideCard extends StatelessWidget {
                 inset: inset,
                 onBack: onBack,
                 onExpand: onExpand,
-                searchQuery: searchQuery,
               ),
               Expanded(
                 child: Padding(
@@ -788,7 +800,7 @@ class _SideCard extends StatelessWidget {
   }
 }
 
-class _SideHeader extends StatefulWidget {
+class _SideHeader extends StatelessWidget {
   const _SideHeader({
     required this.title,
     required this.chevron,
@@ -796,7 +808,6 @@ class _SideHeader extends StatefulWidget {
     required this.inset,
     required this.onBack,
     required this.onExpand,
-    this.searchQuery,
   });
 
   final String title;
@@ -807,85 +818,64 @@ class _SideHeader extends StatefulWidget {
   final double inset;
   final VoidCallback onBack;
   final VoidCallback onExpand;
-  final ValueNotifier<String>? searchQuery;
-
-  @override
-  State<_SideHeader> createState() => _SideHeaderState();
-}
-
-class _SideHeaderState extends State<_SideHeader> {
-  final TextEditingController _search = TextEditingController();
-  bool _searchOpen = false;
-
-  @override
-  void dispose() {
-    _search.dispose();
-    super.dispose();
-  }
-
-  void _toggleSearch() {
-    setState(() {
-      _searchOpen = !_searchOpen;
-      if (!_searchOpen) {
-        _search.clear();
-        widget.searchQuery?.value = '';
-      }
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
-    final e = widget.expand;
-    final left = widget.chevron == _SideChevron.left;
-    final hasSearch = widget.searchQuery != null;
+    final e = expand;
+    final left = chevron == _SideChevron.left;
 
-    // The big parked title sits LOW on the page — the demo leaves ~165pt of
-    // whitespace between the chevron row and the title (f0023/f0070: title
-    // ~26% down the screen). Expanding slides it up beside the chevron,
-    // staying large, like the demo's full Messages view (f0097).
-    final titleSize = lerpDouble(44, 40, e)!;
-    final titleTop = lerpDouble(164, 8, e)!;
-    final titleLeft =
-        left ? lerpDouble(widget.inset + 20, 56, e)! : 20.0;
+    // Parked: the big 43pt SemiBold title sits LOW on the page (Figma: cap
+    // top ~231, i.e. ~165pt below the chevron row). Expanded: it morphs into
+    // the design's compact `‹ Title` app-bar row — 20pt beside a LEFT back
+    // chevron (Discover's parked chevron sits right and hands over to a
+    // left one as the page fills the screen).
+    final titleSize = lerpDouble(43, 20, e)!;
+    final titleTop = lerpDouble(164, 13, e)!;
+    final titleLeft = left
+        ? lerpDouble(inset + 20, 56, e)!
+        : lerpDouble(20, 56, e)!;
 
-    final header = SizedBox(
-      height: lerpDouble(228, 64, e)!,
+    return SizedBox(
+      height: lerpDouble(228, 48, e)!,
       width: double.infinity,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
+          // Left back chevron: always present on the Messages side; on the
+          // Discover side it fades in as the page expands.
           Positioned(
-            top: lerpDouble(0, 6, e)!,
-            left: left ? 0 : null,
-            right: left ? null : 0,
-            child: IconButton(
-              onPressed: widget.onBack,
-              iconSize: 22,
-              icon: Icon(
-                left
-                    ? Icons.arrow_back_ios_new_rounded
-                    : Icons.arrow_forward_ios_rounded,
-                color: AppColors.brandRed,
+            top: 0,
+            left: 0,
+            child: Opacity(
+              opacity: left ? 1.0 : e,
+              child: IgnorePointer(
+                ignoring: !left && e < 0.5,
+                child: IconButton(
+                  onPressed: onBack,
+                  iconSize: 22,
+                  icon: const Icon(
+                    Icons.arrow_back_ios_new_rounded,
+                    color: AppColors.brandRed,
+                  ),
+                ),
               ),
             ),
           ),
-          // Search appears only once the page has expanded (demo behaviour).
-          if (hasSearch)
+          // Right forward chevron (Discover parked) — fades out on expand.
+          if (!left)
             Positioned(
               top: 0,
-              right: 4,
+              right: 0,
               child: Opacity(
-                opacity: e,
+                opacity: 1.0 - e,
                 child: IgnorePointer(
-                  ignoring: e < 0.5,
+                  ignoring: e > 0.5,
                   child: IconButton(
-                    onPressed: _toggleSearch,
-                    iconSize: 24,
-                    icon: Icon(
-                      _searchOpen
-                          ? Icons.close_rounded
-                          : Icons.search_rounded,
-                      color: Colors.black87,
+                    onPressed: onBack,
+                    iconSize: 22,
+                    icon: const Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      color: AppColors.brandRed,
                     ),
                   ),
                 ),
@@ -895,16 +885,17 @@ class _SideHeaderState extends State<_SideHeader> {
             top: titleTop,
             left: titleLeft,
             child: GestureDetector(
-              onTap: e < 0.5 ? widget.onExpand : null,
+              onTap: e < 0.5 ? onExpand : null,
               child: Text(
-                widget.title,
+                title,
                 maxLines: 1,
                 softWrap: false,
                 overflow: TextOverflow.visible,
+                // Figma: Instrument Sans SemiBold, letter spacing 0.
                 style: TextStyle(
                   fontSize: titleSize,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0,
                   color: Colors.black,
                 ),
               ),
@@ -912,38 +903,6 @@ class _SideHeaderState extends State<_SideHeader> {
           ),
         ],
       ),
-    );
-
-    if (!(hasSearch && _searchOpen)) return header;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        header,
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-          child: TextField(
-            controller: _search,
-            autofocus: true,
-            onChanged: (v) => widget.searchQuery?.value = v,
-            style: const TextStyle(fontSize: 14),
-            decoration: InputDecoration(
-              hintText: 'Search messages…',
-              hintStyle:
-                  const TextStyle(fontSize: 14, color: Color(0xFFAAAAAA)),
-              prefixIcon: const Icon(Icons.search_rounded,
-                  size: 20, color: Color(0xFFAAAAAA)),
-              filled: true,
-              fillColor: const Color(0xFFF5F5F5),
-              contentPadding:
-                  const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -1058,8 +1017,7 @@ class _PageTitleStrip extends StatelessWidget {
           // (demo f0023/f0070 — the parked sliver shows Home's edge glyphs,
           // never the side page's title, which lives on the side page).
           final deckT = (raw - 2.0).abs().clamp(0.0, 1.0);
-          final page =
-              lerpDouble((raw - 1.0).clamp(0.0, 2.0), 1.0, deckT)!;
+          final page = lerpDouble((raw - 1.0).clamp(0.0, 2.0), 1.0, deckT)!;
           return LayoutBuilder(
             builder: (context, c) {
               // Neighbour titles sit mostly off-screen — only a clipped
@@ -1103,9 +1061,9 @@ class _PageTitleStrip extends StatelessWidget {
               softWrap: false,
               overflow: TextOverflow.visible,
               style: TextStyle(
-                fontSize: 40.0 - 4.0 * dist,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.5,
+                fontSize: 42.0 - 4.0 * dist,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0,
                 color: Color.lerp(active, const Color(0xFFB4B8BB), dist),
               ),
             ),
@@ -1143,17 +1101,19 @@ class _DiscoverCard extends StatelessWidget {
   final void Function(NearbyPeer) onPersonTap;
   final VoidCallback onOpenSheet;
 
-  // Stays essentially pure black for the top quarter before warming toward
-  // the brand red (demo f0001 — the red only reads in the lower half).
+  // Sampled from the demo (f0001): essentially pure black through the top
+  // quarter, warming through wine tones to a deep crimson — noticeably
+  // cooler than brandRed, which stays the accent/CTA color only.
   static const _idleGradient = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
-    stops: [0.0, 0.25, 0.62, 1.0],
+    stops: [0.0, 0.25, 0.5, 0.75, 1.0],
     colors: [
       Colors.black,
-      Color(0xFF190405),
-      Color(0xFF5E0F13),
-      AppColors.brandRed,
+      Color(0xFF0E0E0E),
+      Color(0xFF390F16),
+      Color(0xFF8A0E28),
+      Color(0xFFD90E33),
     ],
   );
   static const _meetGradient = LinearGradient(
@@ -1212,12 +1172,17 @@ class _DiscoverCard extends StatelessWidget {
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 gradient: active ? _meetGradient : _idleGradient,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(28)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(28),
+                ),
               ),
               child: active
-                  ? _buildActive(context, sessionState as SessionActive,
-                      pending, reduceMotion)
+                  ? _buildActive(
+                      context,
+                      sessionState as SessionActive,
+                      pending,
+                      reduceMotion,
+                    )
                   : _buildIdle(context, pending, reduceMotion),
             );
           },
@@ -1248,7 +1213,10 @@ class _DiscoverCard extends StatelessWidget {
           'You are not discoverable',
           textAlign: TextAlign.center,
           style: TextStyle(
-              fontSize: 23, fontWeight: FontWeight.w800, color: Colors.white),
+            fontSize: 23,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
         ),
         const SizedBox(height: 6),
         const Text(
@@ -1316,8 +1284,12 @@ class _DiscoverCard extends StatelessWidget {
     );
   }
 
-  Widget _buildActive(BuildContext context, SessionActive state, int pending,
-      bool reduceMotion) {
+  Widget _buildActive(
+    BuildContext context,
+    SessionActive state,
+    int pending,
+    bool reduceMotion,
+  ) {
     return Column(
       children: [
         Expanded(
@@ -1338,7 +1310,10 @@ class _DiscoverCard extends StatelessWidget {
               : 'You are discoverable',
           textAlign: TextAlign.center,
           style: const TextStyle(
-              fontSize: 23, fontWeight: FontWeight.w800, color: Colors.white),
+            fontSize: 23,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
         ),
         const SizedBox(height: 6),
         _CountdownText(
@@ -1409,8 +1384,8 @@ class _CountdownTextState extends State<_CountdownText>
             final color = !urgent
                 ? _base
                 : widget.reduceMotion
-                    ? AppColors.brandRed
-                    : Color.lerp(_base, AppColors.brandRed, _pulse.value)!;
+                ? AppColors.brandRed
+                : Color.lerp(_base, AppColors.brandRed, _pulse.value)!;
             return Text(
               'Time Remaining: ${TimeFormat.countdown(d)}',
               textAlign: TextAlign.center,
@@ -1487,8 +1462,7 @@ class _PullUpIndicator extends StatelessWidget {
       child: Opacity(
         opacity: active ? 1.0 : 0.4,
         child: ColorFiltered(
-          colorFilter:
-              const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+          colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
           child: Lottie.asset(
             'assets/animation/pull-up.json',
             repeat: animate,
@@ -1563,8 +1537,7 @@ class _MeetRadar extends StatefulWidget {
   State<_MeetRadar> createState() => _MeetRadarState();
 }
 
-class _MeetRadarState extends State<_MeetRadar>
-    with TickerProviderStateMixin {
+class _MeetRadarState extends State<_MeetRadar> with TickerProviderStateMixin {
   static const _maxBubbles = 5;
 
   /// Fresh single-listener stream per radar mount (a new _MeetRadar is
@@ -1638,8 +1611,7 @@ class _MeetRadarState extends State<_MeetRadar>
   /// Radial placement ∝ estimated distance; angle stable per peer.
   Alignment _alignmentFor(NearbyPeer p) {
     final angle = (p.displayKey.hashCode % 360) * math.pi / 180.0;
-    final frac =
-        (p.meters / math.max(widget.maxMeters, 0.1)).clamp(0.12, 1.0);
+    final frac = (p.meters / math.max(widget.maxMeters, 0.1)).clamp(0.12, 1.0);
     final r = 0.30 + 0.55 * frac;
     return Alignment(math.cos(angle) * r, math.sin(angle) * r * 0.85);
   }
@@ -1650,9 +1622,7 @@ class _MeetRadarState extends State<_MeetRadar>
       alignment: Alignment.center,
       clipBehavior: Clip.none,
       children: [
-        const Positioned.fill(
-          child: CustomPaint(painter: _RingsPainter()),
-        ),
+        const Positioned.fill(child: CustomPaint(painter: _RingsPainter())),
         // Continuous pulse emanating from the centre while the session runs
         // (A3; suppressed at reduced motion).
         if (!widget.reduceMotion)
@@ -1702,10 +1672,13 @@ class _MeetRadarState extends State<_MeetRadar>
         opacity: t.clamp(0.0, 1.0),
         child: Transform.scale(scale: 0.6 + 0.4 * t, child: child),
       ),
-      child: _floating(peer, _NearbyAvatar(
-        peer: peer,
-        onTap: peer.card == null ? null : () => widget.onPersonTap(peer),
-      )),
+      child: _floating(
+        peer,
+        _NearbyAvatar(
+          peer: peer,
+          onTap: peer.card == null ? null : () => widget.onPersonTap(peer),
+        ),
+      ),
     );
   }
 
@@ -1821,8 +1794,11 @@ class _NearbyAvatar extends StatelessWidget {
               height: 64,
               child: CustomPaint(
                 painter: _DashedRingPainter(),
-                child: Icon(Icons.person_outline,
-                    color: Colors.white54, size: 28),
+                child: Icon(
+                  Icons.person_outline,
+                  color: Colors.white54,
+                  size: 28,
+                ),
               ),
             ),
           const SizedBox(height: 6),
@@ -1983,8 +1959,10 @@ class _DarkSettingRow extends StatelessWidget {
             value: value,
             isDense: true,
             dropdownColor: const Color(0xFF222222),
-            icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                color: Colors.white),
+            icon: const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: Colors.white,
+            ),
             style: TextStyle(
               fontFamily: family,
               fontSize: 15,
@@ -1994,14 +1972,19 @@ class _DarkSettingRow extends StatelessWidget {
               decorationColor: Colors.white,
             ),
             items: items
-                .map((o) => DropdownMenuItem(
-                      value: o,
-                      child: Text(o,
-                          style: TextStyle(
-                              fontFamily: family,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700)),
-                    ))
+                .map(
+                  (o) => DropdownMenuItem(
+                    value: o,
+                    child: Text(
+                      o,
+                      style: TextStyle(
+                        fontFamily: family,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                )
                 .toList(),
             onChanged: (v) {
               if (v != null) onChanged(v);
@@ -2035,8 +2018,8 @@ class _ConnectSheetModal extends StatefulWidget {
 
 class _ConnectSheetModalState extends State<_ConnectSheetModal> {
   /// Fresh single-listener stream per sheet opening.
-  late final Stream<List<ConnectionRequest>> _requests =
-      AppServices.I.requests.watchIncomingPending();
+  late final Stream<List<ConnectionRequest>> _requests = AppServices.I.requests
+      .watchIncomingPending();
 
   bool _expanded = false;
 
@@ -2070,8 +2053,10 @@ class _ConnectSheetModalState extends State<_ConnectSheetModal> {
     final media = MediaQuery.of(context);
     // Cap the full height so the sheet never rises above the camera pill.
     final maxFrac =
-        ((media.size.height - media.padding.top - 8) / media.size.height)
-            .clamp(0.6, 0.94);
+        ((media.size.height - media.padding.top - 8) / media.size.height).clamp(
+          0.6,
+          0.94,
+        );
 
     return NotificationListener<DraggableScrollableNotification>(
       onNotification: (n) {
@@ -2180,20 +2165,15 @@ class _ConnectSheetModalState extends State<_ConnectSheetModal> {
                         ),
                       ),
                       SliverList(
-                        delegate: SliverChildBuilderDelegate(
-                          (context, i) {
-                            final request = items[i];
-                            return _SheetRequestTile(
-                              request: request,
-                              busy: _busy.contains(request.id),
-                              onAccept: () =>
-                                  _run(request, widget.onAccept),
-                              onDecline: () =>
-                                  _run(request, widget.onDecline),
-                            );
-                          },
-                          childCount: items.length,
-                        ),
+                        delegate: SliverChildBuilderDelegate((context, i) {
+                          final request = items[i];
+                          return _SheetRequestTile(
+                            request: request,
+                            busy: _busy.contains(request.id),
+                            onAccept: () => _run(request, widget.onAccept),
+                            onDecline: () => _run(request, widget.onDecline),
+                          );
+                        }, childCount: items.length),
                       ),
                       SliverToBoxAdapter(
                         child: SizedBox(height: 24 + media.padding.bottom),
@@ -2239,25 +2219,36 @@ class _SheetRequestTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(card.name,
+                Text(
+                  card.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black,
+                  ),
+                ),
+                if (card.designation.isNotEmpty)
+                  Text(
+                    card.designation,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.black)),
-                if (card.designation.isNotEmpty)
-                  Text(card.designation,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 13, color: Color(0xFF6B6B6B))),
+                      fontSize: 13,
+                      color: Color(0xFF6B6B6B),
+                    ),
+                  ),
                 if (card.company.isNotEmpty)
-                  Text(card.company,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 13, color: Color(0xFF6B6B6B))),
+                  Text(
+                    card.company,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF6B6B6B),
+                    ),
+                  ),
                 if (note != null && note.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
@@ -2301,9 +2292,14 @@ class _RedBtn extends StatelessWidget {
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      child: Text(label,
-          style: const TextStyle(
-              fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+        ),
+      ),
     );
   }
 }
@@ -2325,11 +2321,14 @@ class _GrayBtn extends StatelessWidget {
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      child: Text(label,
-          style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF6B6B6B))),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF6B6B6B),
+        ),
+      ),
     );
   }
 }
@@ -2358,8 +2357,8 @@ class _IncognitoSwitch extends StatelessWidget {
     final trackColor = value
         ? const Color(0xFFEAD0CB)
         : (immersive
-            ? Colors.white.withValues(alpha: 0.22)
-            : AppColors.brandRed.withValues(alpha: 0.18));
+              ? Colors.white.withValues(alpha: 0.22)
+              : AppColors.brandRed.withValues(alpha: 0.18));
     return Semantics(
       label: value ? 'Incognito mode on' : 'Public mode on',
       toggled: value,
@@ -2448,7 +2447,10 @@ class _IncognitoHatPainter extends CustomPainter {
     canvas.drawCircle(Offset(w * 0.30, h * 0.74), h * 0.13, stroke);
     canvas.drawCircle(Offset(w * 0.70, h * 0.74), h * 0.13, stroke);
     canvas.drawLine(
-        Offset(w * 0.43, h * 0.74), Offset(w * 0.57, h * 0.74), stroke);
+      Offset(w * 0.43, h * 0.74),
+      Offset(w * 0.57, h * 0.74),
+      stroke,
+    );
   }
 
   @override

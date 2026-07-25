@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../../../core/data/mock_data.dart';
 import '../../../../core/domain/models.dart';
 import '../../../../core/repositories/repositories.dart';
 import '../../../../core/services/app_services.dart';
@@ -261,6 +262,20 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
               trailing: const Icon(Icons.ios_share_rounded,
                   color: Colors.black, size: 20),
               onTap: _shareProfile,
+            ),
+          ]),
+          const SizedBox(height: 12),
+          _RowGroup(rows: [
+            ValueListenableBuilder<bool>(
+              valueListenable: MockData.demoContent,
+              builder: (_, v, _) => SwitchListTile(
+                title: const Text('Demo Content'),
+                subtitle:
+                    const Text('Show sample people in Discover & Messages'),
+                value: v,
+                activeTrackColor: AppColors.brandRed,
+                onChanged: (on) => MockData.demoContent.value = on,
+              ),
             ),
           ]),
           const SizedBox(height: 12),

@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../core/data/mock_data.dart';
 import '../../../../core/domain/models.dart';
 import '../../../../core/services/app_services.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -14,11 +16,20 @@ import 'nearby_person_profile_screen.dart';
 /// ([AppServices.I.encounters]); the date band + calendar picker jump
 /// between days that actually have encounters.
 class DiscoverHistoryScreen extends StatefulWidget {
-  const DiscoverHistoryScreen({super.key, this.embedded = false});
+  const DiscoverHistoryScreen({
+    super.key,
+    this.embedded = false,
+    this.fullChrome,
+  });
 
   /// When `true`, render the body only (no Scaffold/AppBar) so the screen can
   /// be hosted inside the swipeable [HomeShell] under its shared header.
   final bool embedded;
+
+  /// Deck hosting only: reports `true` while the page is expanded to full
+  /// screen, which unlocks the standalone chrome (view toggle + calendar,
+  /// per the design's full Discover). `null` = standalone (always shown).
+  final ValueListenable<bool>? fullChrome;
 
   @override
   State<DiscoverHistoryScreen> createState() => _DiscoverHistoryScreenState();
@@ -31,6 +42,16 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
   late final PageController _pageController;
   int _page = 0;
 
+  bool get _isToday {
+    final now = DateTime.now();
+    return _day.year == now.year &&
+        _day.month == now.month &&
+        _day.day == now.day;
+  }
+
+  bool get _chromeVisible =>
+      !widget.embedded || (widget.fullChrome?.value ?? false);
+
   @override
   void initState() {
     super.initState();
@@ -38,10 +59,16 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
     _day = DateTime(now.year, now.month, now.day);
     _stream = AppServices.I.encounters.watchDay(_day);
     _pageController = PageController(viewportFraction: 0.88);
+    widget.fullChrome?.addListener(_onChrome);
+  }
+
+  void _onChrome() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    widget.fullChrome?.removeListener(_onChrome);
     _pageController.dispose();
     super.dispose();
   }
@@ -75,17 +102,29 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
   }
 
   Future<void> _connect(Encounter e) async {
+    // Demo sample rows have no real peer behind them.
+    if (e.id.startsWith(MockData.demoPrefix)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 2),
+          content: Text('Sample profile — demo content'),
+        ),
+      );
+      return;
+    }
     await sendConnectRequestFlow(context, toCard: e.card, encounterId: e.id);
   }
 
   void _openProfile(Encounter e) {
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => NearbyPersonProfileScreen(
-        card: e.card,
-        encounterId: e.id,
-        meters: e.meters,
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => NearbyPersonProfileScreen(
+          card: e.card,
+          encounterId: e.id,
+          meters: e.meters,
+        ),
       ),
-    ));
+    );
   }
 
   @override
@@ -94,33 +133,36 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: Row(
             children: [
               const Expanded(
                 child: Text(
                   'People You Crossed Paths',
-                  // 18pt keeps this on a single line even when the page is
-                  // parked beside the Home peek (demo shows one line).
+                  // Figma: Instrument Sans SemiBold 18 (also keeps a single
+                  // line when parked beside the Home peek).
                   style: TextStyle(
                     fontSize: 18,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     color: Colors.black,
                   ),
                 ),
               ),
-              // Embedded in the Home deck the demo keeps the chrome minimal —
-              // no view toggle or calendar button (day-picking moves to the
-              // tappable date band below).
-              if (!widget.embedded) ...[
+              // Parked in the deck the chrome stays minimal; the view toggle
+              // and calendar appear once the page is full-screen (design's
+              // full Discover) or standalone.
+              if (_chromeVisible) ...[
                 _ViewToggle(
                   grid: _grid,
                   onChanged: (v) => setState(() => _grid = v),
                 ),
                 const SizedBox(width: 12),
                 IconButton(
-                  icon: const Icon(Icons.calendar_today_outlined,
-                      color: Colors.black, size: 22),
+                  icon: const Icon(
+                    Icons.calendar_today_outlined,
+                    color: Colors.black,
+                    size: 22,
+                  ),
                   onPressed: _pickDay,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
@@ -135,13 +177,14 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
           child: Container(
             width: double.infinity,
             color: AppColors.brandRedSoft,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Text(
               TimeFormat.dateBand(_day),
+              // Figma: Instrument Sans Medium 16, #C60013.
               style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppColors.brandRed,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFFC60013),
               ),
             ),
           ),
@@ -149,19 +192,26 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
         Expanded(
           child: ValueListenableBuilder<bool>(
             valueListenable: AppServices.I.settings.use24hTime,
-            builder: (context, use24h, _) =>
-                StreamBuilder<List<Encounter>>(
-              stream: _stream,
-              builder: (context, snapshot) {
-                final rows = snapshot.data;
-                if (rows == null) return const SizedBox.shrink();
-                if (rows.isEmpty) return const _EmptyState();
-                // The grid/carousel view is a non-embedded affordance only.
-                final grid = _grid && !widget.embedded;
-                return grid
-                    ? _buildCarousel(rows, use24h)
-                    : _buildList(rows, use24h);
-              },
+            builder: (context, use24h, _) => ValueListenableBuilder<bool>(
+              valueListenable: MockData.demoContent,
+              builder: (context, demo, _) => StreamBuilder<List<Encounter>>(
+                stream: _stream,
+                builder: (context, snapshot) {
+                  var rows = snapshot.data;
+                  if (rows == null) return const SizedBox.shrink();
+                  // Demo content: prepend the prototype's sample timeline on
+                  // today's page (display only — never persisted).
+                  if (demo && _isToday) {
+                    rows = [...MockData.demoEncounters(), ...rows];
+                  }
+                  if (rows.isEmpty) return const _EmptyState();
+                  // The grid/carousel view needs the full-screen chrome.
+                  final grid = _grid && _chromeVisible;
+                  return grid
+                      ? _buildCarousel(rows, use24h)
+                      : _buildList(rows, use24h);
+                },
+              ),
             ),
           ),
         ),
@@ -176,8 +226,11 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
         backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: Colors.black, size: 20),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.black,
+            size: 20,
+          ),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: const Text(
@@ -198,81 +251,100 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
 
   Widget _buildList(List<Encounter> rows, bool use24h) {
     return ListView.separated(
-      padding: const EdgeInsets.only(bottom: 24),
+      // Explicit padding replaces the ListView's automatic safe-area inset,
+      // so the home-indicator area must be re-added — otherwise the last row
+      // hides behind the bottom bar (unlike the design).
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).padding.bottom + 24,
+      ),
       itemCount: rows.length,
       // Whitespace-only separation, like the demo timeline.
       separatorBuilder: (_, _) => const SizedBox.shrink(),
       itemBuilder: (context, index) {
         final e = rows[index];
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          child: LayoutBuilder(builder: (context, c) {
-            // Parked beside the Home peek the row is too narrow for the
-            // Connect pill (and the demo's parked timeline shows none) —
-            // it appears once the page expands toward full width. Rows stay
-            // tappable either way (profile view carries its own Connect).
-            final showPill = c.maxWidth >= 300;
-            return Row(
-              children: [
-              SizedBox(
-                width: 52,
-                child: Text(
-                  TimeFormat.clock(e.lastSeen, use24h: use24h),
-                  style:
-                      const TextStyle(fontSize: 13, color: Color(0xFF8A8A8A)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: () => _openProfile(e),
-                child:
-                    PeerAvatar(card: e.card, size: 56, showVerified: true),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => _openProfile(e),
-                  behavior: HitTestBehavior.opaque,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        e.card.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black,
-                        ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: LayoutBuilder(
+            builder: (context, c) {
+              // Parked beside the Home peek the row is too narrow for the
+              // Connect pill (and the design's parked timeline shows none) —
+              // it appears once the page expands toward full width. Rows stay
+              // tappable either way (profile view carries its own Connect).
+              final showPill = c.maxWidth >= 300;
+              return Row(
+                children: [
+                  SizedBox(
+                    width: 52,
+                    child: Text(
+                      TimeFormat.clock(e.lastSeen, use24h: use24h),
+                      // Figma: Instrument Sans Medium 12, #000.
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.black,
                       ),
-                      Text(
-                        e.card.designation.isNotEmpty
-                            ? e.card.designation
-                            : e.card.role,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 14, color: Color(0xFF6B6B6B)),
-                      ),
-                      Text(
-                        e.card.company,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 14, color: Color(0xFF6B6B6B)),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-                if (showPill) ...[
                   const SizedBox(width: 8),
-                  _ConnectPill(encounter: e, onConnect: () => _connect(e)),
+                  GestureDetector(
+                    onTap: () => _openProfile(e),
+                    child: PeerAvatar(
+                      card: e.card,
+                      size: 56,
+                      showVerified: true,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => _openProfile(e),
+                      behavior: HitTestBehavior.opaque,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            e.card.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            // Figma: Instrument Sans Medium 14, #000.
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.black,
+                            ),
+                          ),
+                          Text(
+                            e.card.designation.isNotEmpty
+                                ? e.card.designation
+                                : e.card.role,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xB3000000),
+                            ),
+                          ),
+                          Text(
+                            e.card.company,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xB3000000),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (showPill) ...[
+                    const SizedBox(width: 8),
+                    _ConnectPill(encounter: e, onConnect: () => _connect(e)),
+                  ],
                 ],
-              ],
-            );
-          }),
+              );
+            },
+          ),
         );
       },
     );
@@ -289,8 +361,7 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
             controller: _pageController,
             itemCount: rows.length,
             onPageChanged: (i) => setState(() => _page = i),
-            itemBuilder: (context, index) =>
-                _buildCard(rows[index], use24h),
+            itemBuilder: (context, index) => _buildCard(rows[index], use24h),
           ),
         ),
         Padding(
@@ -329,7 +400,8 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
             color: Colors.white,
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
-                color: AppColors.brandRed.withValues(alpha: 0.35)),
+              color: AppColors.brandRed.withValues(alpha: 0.35),
+            ),
             boxShadow: [
               BoxShadow(
                 color: AppColors.brandRed.withValues(alpha: 0.18),
@@ -342,8 +414,7 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
             children: [
               Text(
                 TimeFormat.clock(e.lastSeen, use24h: use24h),
-                style:
-                    const TextStyle(fontSize: 12, color: Color(0xFF8A8A8A)),
+                style: const TextStyle(fontSize: 12, color: Color(0xFF8A8A8A)),
               ),
               const SizedBox(height: 12),
               PeerAvatar(card: e.card, size: 96, showVerified: true),
@@ -363,8 +434,7 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
                 e.card.titleLine,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style:
-                    const TextStyle(fontSize: 14, color: Color(0xFF6B6B6B)),
+                style: const TextStyle(fontSize: 14, color: Color(0xFF6B6B6B)),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -468,22 +538,25 @@ class _ViewToggle extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           _segment(
-              icon: Icons.view_agenda_outlined,
-              selected: !grid,
-              onTap: () => onChanged(false)),
+            icon: Icons.view_agenda_outlined,
+            selected: !grid,
+            onTap: () => onChanged(false),
+          ),
           _segment(
-              icon: Icons.grid_view_rounded,
-              selected: grid,
-              onTap: () => onChanged(true)),
+            icon: Icons.grid_view_rounded,
+            selected: grid,
+            onTap: () => onChanged(true),
+          ),
         ],
       ),
     );
   }
 
-  Widget _segment(
-      {required IconData icon,
-      required bool selected,
-      required VoidCallback onTap}) {
+  Widget _segment({
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -494,9 +567,11 @@ class _ViewToggle extends StatelessWidget {
           color: selected ? Colors.white : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(icon,
-            size: 18,
-            color: selected ? AppColors.brandRed : const Color(0xFF8A8A8A)),
+        child: Icon(
+          icon,
+          size: 18,
+          color: selected ? AppColors.brandRed : const Color(0xFF8A8A8A),
+        ),
       ),
     );
   }
@@ -515,8 +590,11 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.explore_outlined,
-                size: 56, color: AppColors.brandRed.withValues(alpha: 0.35)),
+            Icon(
+              Icons.explore_outlined,
+              size: 56,
+              color: AppColors.brandRed.withValues(alpha: 0.35),
+            ),
             const SizedBox(height: 14),
             const Text(
               'No crossed paths yet',

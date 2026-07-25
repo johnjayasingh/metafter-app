@@ -526,6 +526,7 @@ class _CardDeckState extends State<_CardDeck> {
                         opacity: 1.0 - _sideFade * (p - 1).clamp(0.0, 1.0),
                         child: _frame(
                           widget.discoverBuilder((1 - p).clamp(0.0, 1.0)),
+                          (1 - p).clamp(0.0, 1.0),
                         ),
                       ),
                     ),
@@ -540,6 +541,7 @@ class _CardDeckState extends State<_CardDeck> {
                         opacity: 1.0 - _sideFade * (3 - p).clamp(0.0, 1.0),
                         child: _frame(
                           widget.messagesBuilder((p - 3).clamp(0.0, 1.0)),
+                          (p - 3).clamp(0.0, 1.0),
                         ),
                       ),
                     ),
@@ -584,17 +586,20 @@ class _CardDeckState extends State<_CardDeck> {
                           child: AbsorbPointer(
                             absorbing: t1 > 0.15,
                             child: DecoratedBox(
+                              // Card chrome (radius + shadow) exists only
+                              // while carding — at rest the page is flat and
+                              // flush with the top.
                               decoration: BoxDecoration(
-                                borderRadius: BorderRadius.vertical(
-                                  top: Radius.circular(radius),
-                                  bottom: Radius.circular(radius * t1),
+                                borderRadius: BorderRadius.circular(
+                                  radius * t1,
                                 ),
-                                boxShadow: _cardShadow,
+                                boxShadow: t1 > 0.01
+                                    ? _cardShadow
+                                    : const <BoxShadow>[],
                               ),
                               child: ClipRRect(
-                                borderRadius: BorderRadius.vertical(
-                                  top: Radius.circular(radius),
-                                  bottom: Radius.circular(radius * t1),
+                                borderRadius: BorderRadius.circular(
+                                  radius * t1,
                                 ),
                                 child: widget.home,
                               ),
@@ -613,17 +618,17 @@ class _CardDeckState extends State<_CardDeck> {
     );
   }
 
-  /// Frame for the side pages: rounded top corners, drop shadow, clipping.
-  Widget _frame(Widget child) {
+  /// Frame for the side pages: rounded top corners + shadow while parked /
+  /// mid-transition, flattening to a plain full-bleed page at full screen.
+  Widget _frame(Widget child, double expand) {
+    final r = Radius.circular(_cardRadius * (1.0 - expand));
     return DecoratedBox(
-      decoration: const BoxDecoration(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(_cardRadius)),
-        boxShadow: _cardShadow,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.vertical(top: r),
+        boxShadow: expand > 0.99 ? const <BoxShadow>[] : _cardShadow,
       ),
       child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(_cardRadius),
-        ),
+        borderRadius: BorderRadius.vertical(top: r),
         child: child,
       ),
     );
@@ -844,15 +849,16 @@ class _SideHeader extends StatelessWidget {
     // the design's compact `‹ Title` app-bar row — 20pt beside a LEFT back
     // chevron (Discover's parked chevron sits right and hands over to a
     // left one as the page fills the screen).
-    // Figma full view: 18pt SemiBold title, cap-top ~70 (box ~65), left 56.
+    // Figma full view: 18pt SemiBold title at cap-top 70 ABSOLUTE — the
+    // SafeArea already supplies ~59, so only ~8 remains inside the header.
     final titleSize = lerpDouble(43, 18, e)!;
-    final titleTop = lerpDouble(164, 65, e)!;
+    final titleTop = lerpDouble(164, 8, e)!;
     final titleLeft = left
         ? lerpDouble(inset + 20, 56, e)!
         : lerpDouble(20, 56, e)!;
 
     return SizedBox(
-      height: lerpDouble(228, 108, e)!,
+      height: lerpDouble(228, 50, e)!,
       width: double.infinity,
       child: Stack(
         clipBehavior: Clip.none,
@@ -860,7 +866,9 @@ class _SideHeader extends StatelessWidget {
           // Left back chevron: always present on the Messages side; on the
           // Discover side it fades in as the page expands.
           Positioned(
-            top: lerpDouble(0, 52, e)!,
+            // The 48pt icon box centres its glyph at 24; the compact title
+            // centres at ~19 — lift the chevron so both align at full.
+            top: lerpDouble(0, -5, e)!,
             left: 0,
             child: Opacity(
               opacity: left ? 1.0 : e,
@@ -899,7 +907,7 @@ class _SideHeader extends StatelessWidget {
             ),
           if (trailing != null)
             Positioned(
-              top: lerpDouble(0, 58, e)!,
+              top: lerpDouble(0, 3, e)!,
               right: 12,
               child: Opacity(
                 opacity: e,

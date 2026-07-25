@@ -596,12 +596,19 @@ class _SwipeDeck extends StatefulWidget {
   State<_SwipeDeck> createState() => _SwipeDeckState();
 }
 
-class _SwipeDeckState extends State<_SwipeDeck>
-    with SingleTickerProviderStateMixin {
+class _SwipeDeckState extends State<_SwipeDeck> with TickerProviderStateMixin {
   late final AnimationController _anim = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 260),
   );
+
+  /// Runs after a commit: the NEW deepest slab fades + slides into its slot
+  /// instead of popping in (starts settled so first build shows the stack).
+  late final AnimationController _settle = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 280),
+    value: 1,
+  )..addListener(() => setState(() {}));
 
   /// Front card's horizontal displacement (finger or animation driven).
   double _x = 0;
@@ -611,6 +618,7 @@ class _SwipeDeckState extends State<_SwipeDeck>
   @override
   void dispose() {
     _anim.dispose();
+    _settle.dispose();
     super.dispose();
   }
 
@@ -640,6 +648,7 @@ class _SwipeDeckState extends State<_SwipeDeck>
           _committing = false;
           _x = 0;
           widget.onFrontChanged((widget.front + 1) % widget.rows.length);
+          _settle.forward(from: 0);
         }
         setState(() {});
       });
@@ -694,21 +703,29 @@ class _SwipeDeckState extends State<_SwipeDeck>
         // near slab's geometry while the stack promotes.
         Widget deepSlab() {
           final t = reveal;
+          // Restock: fade + slide in from one step further back.
+          final settle = Curves.easeOut.transform(_settle.value);
           return Align(
             alignment: const Alignment(0, -0.13),
-            child: Transform.translate(
-              offset: Offset(_lerp(-60.5, -44.5, t) * kw, 0),
-              child: SizedBox(
-                width: 235.0 * kw,
-                height: _lerp(308.0, 360.0, t) * kh,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Color.lerp(
-                      const Color(0x80E0E0E0),
-                      const Color(0xFFEFE1E1),
-                      t,
-                    )!,
-                    borderRadius: BorderRadius.circular(36 * kw),
+            child: Opacity(
+              opacity: settle,
+              child: Transform.translate(
+                offset: Offset(
+                  _lerp(-60.5, -44.5, t) * kw - (1.0 - settle) * 16.0,
+                  0,
+                ),
+                child: SizedBox(
+                  width: 235.0 * kw,
+                  height: _lerp(308.0, 360.0, t) * kh,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Color.lerp(
+                        const Color(0x80E0E0E0),
+                        const Color(0xFFEFE1E1),
+                        t,
+                      )!,
+                      borderRadius: BorderRadius.circular(36 * kw),
+                    ),
                   ),
                 ),
               ),

@@ -17,9 +17,9 @@ class EnvironmentConfig {
   static String get baseUrl {
     switch (_environment) {
       case Environment.local:
-        return 'https://1fpt127p2k.execute-api.ap-south-1.amazonaws.com/dev/v1';
+        return 'https://8z371tj8gi.execute-api.ap-south-1.amazonaws.com/dev/v1';
       case Environment.dev:
-        return 'https://1fpt127p2k.execute-api.ap-south-1.amazonaws.com/dev/v1';
+        return 'https://8z371tj8gi.execute-api.ap-south-1.amazonaws.com/dev/v1';
       case Environment.uat:
         return 'http://16.176.75.140:8000'; // TODO: uat not deployed yet
       case Environment.production:

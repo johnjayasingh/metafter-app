@@ -16,6 +16,7 @@ class AllMessagesScreen extends StatefulWidget {
     super.key,
     this.embedded = false,
     this.searchQuery,
+    this.rowSwipeEnabled,
   });
 
   /// When `true`, render the body only (no Scaffold/AppBar) so the screen can
@@ -26,6 +27,12 @@ class AllMessagesScreen extends StatefulWidget {
   /// icon drives it), the list filters on this and the screen renders no search
   /// field of its own.
   final ValueListenable<String>? searchQuery;
+
+  /// When provided (deck hosting), thread-row swipe-to-archive is armed only
+  /// while this reports `true` — i.e. once the page is full-screen. Parked in
+  /// the deck, a horizontal drag on a row must page the deck instead, so the
+  /// Dismissibles stand down. `null` (standalone) = always armed.
+  final ValueListenable<bool>? rowSwipeEnabled;
 
   @override
   State<AllMessagesScreen> createState() => _AllMessagesScreenState();
@@ -128,10 +135,14 @@ class _AllMessagesScreenState extends State<AllMessagesScreen> {
               children: [
                 if (chats.isNotEmpty) ...[
                   const _SectionLabel('Chats'),
-                  for (var i = 0; i < chats.length; i++) ...[
-                    _ThreadRow(thread: chats[i], archived: false),
-                    if (i < chats.length - 1) const _RowDivider(),
-                  ],
+                  // No divider between rows — the demo list separates rows
+                  // with whitespace only.
+                  for (final t in chats)
+                    _ThreadRow(
+                      thread: t,
+                      archived: false,
+                      swipeEnabled: widget.rowSwipeEnabled,
+                    ),
                 ],
                 if (archived.isNotEmpty)
                   ExpansionTile(
@@ -150,7 +161,11 @@ class _AllMessagesScreenState extends State<AllMessagesScreen> {
                     ),
                     children: [
                       for (final t in archived)
-                        _ThreadRow(thread: t, archived: true),
+                        _ThreadRow(
+                          thread: t,
+                          archived: true,
+                          swipeEnabled: widget.rowSwipeEnabled,
+                        ),
                     ],
                   ),
               ],
@@ -218,43 +233,51 @@ class _SectionLabel extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: Text(
             text,
+            // Demo f0097: "Chats" is a large black sub-heading under the
+            // page title, not a small grey caption.
             style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF555555),
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.3,
+              color: Colors.black,
             ),
           ),
         ),
       );
 }
 
-class _RowDivider extends StatelessWidget {
-  const _RowDivider();
-
-  @override
-  Widget build(BuildContext context) => const Divider(
-        height: 1,
-        indent: 88,
-        endIndent: 20,
-        color: Color(0xFFF0F0F0),
-      );
-}
-
 // ─── Thread row ──────────────────────────────────────────────────────────────
 
 class _ThreadRow extends StatelessWidget {
-  const _ThreadRow({required this.thread, required this.archived});
+  const _ThreadRow({
+    required this.thread,
+    required this.archived,
+    this.swipeEnabled,
+  });
 
   final ThreadSummary thread;
   final bool archived;
 
+  /// See [AllMessagesScreen.rowSwipeEnabled]; `null` = always armed.
+  final ValueListenable<bool>? swipeEnabled;
+
   @override
   Widget build(BuildContext context) {
+    final listenable = swipeEnabled;
+    if (listenable == null) return _row(context, true);
+    return ValueListenableBuilder<bool>(
+      valueListenable: listenable,
+      builder: (context, enabled, _) => _row(context, enabled),
+    );
+  }
+
+  Widget _row(BuildContext context, bool swipeArmed) {
     final unread = thread.unreadCount > 0;
 
     return Dismissible(
       key: ValueKey('thread-${thread.peerSub}-$archived'),
-      direction: DismissDirection.endToStart,
+      direction:
+          swipeArmed ? DismissDirection.endToStart : DismissDirection.none,
       // A10: red Archive action slides in; we archive via the repository and
       // return false so the row animates out through the stream update
       // rather than the dismissal itself.
@@ -291,7 +314,7 @@ class _ThreadRow extends StatelessWidget {
           builder: (_) => ChatScreen(peerSub: thread.peerSub),
         )),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Row(
             children: [
               PeerAvatar(card: thread.card, size: 56, showVerified: true),
@@ -308,7 +331,7 @@ class _ThreadRow extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 15,
+                              fontSize: 17,
                               fontWeight:
                                   unread ? FontWeight.w800 : FontWeight.w700,
                               color: Colors.black,
@@ -329,30 +352,37 @@ class _ThreadRow extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 3),
-                    Text(
-                      thread.lastFromMe
-                          ? 'You: ${thread.lastMessage}'
-                          : thread.lastMessage,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight:
-                            unread ? FontWeight.w600 : FontWeight.w400,
-                        color: unread
-                            ? const Color(0xFF4A4A4A)
-                            : const Color(0xFF8A8A8A),
-                      ),
+                    // Demo layout: "preview · 3h" on one line, the age
+                    // trailing the (ellipsised) preview text.
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            thread.lastFromMe
+                                ? 'You: ${thread.lastMessage}'
+                                : thread.lastMessage,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight:
+                                  unread ? FontWeight.w600 : FontWeight.w400,
+                              color: unread
+                                  ? const Color(0xFF4A4A4A)
+                                  : const Color(0xFF8A8A8A),
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '  ·  ${TimeFormat.relativeAge(thread.lastMessageAt)}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF8A8A8A),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                TimeFormat.relativeAge(thread.lastMessageAt),
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF8A8A8A),
                 ),
               ),
             ],

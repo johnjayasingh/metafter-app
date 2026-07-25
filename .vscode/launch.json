@@ -5,13 +5,21 @@
       "name": "LOCAL (Debug Pre-fill)",
       "request": "launch",
       "type": "dart",
-      "program": "lib/main_local.dart"
+      "program": "lib/main_local.dart",
+      "args": [
+        "--flavor",
+        "local"
+      ]
     },
     {
       "name": "DEV",
       "request": "launch",
       "type": "dart",
       "program": "lib/main_dev.dart",
+      "args": [
+        "--flavor",
+        "dev"
+      ]
     },
     {
       "name": "UAT",
@@ -27,7 +35,11 @@
       "name": "Production",
       "request": "launch",
       "type": "dart",
-      "program": "lib/main.dart"
+      "program": "lib/main.dart",
+      "args": [
+        "--flavor",
+        "prod"
+      ]
     },
     {
       "name": "LOCAL Web (Debug Pre-fill)",

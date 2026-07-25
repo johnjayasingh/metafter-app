@@ -131,9 +131,20 @@ class CognitoAuthService {
 
   // --- Token / credentials access -----------------------------------------
 
+  /// True only when the active environment actually has Cognito wired up.
+  /// UAT/prod return empty placeholders until deployed, and constructing a
+  /// [CognitoUserPool] with an empty pool id throws
+  /// `ArgumentError('Invalid userPoolId format.')`. The read accessors below
+  /// short-circuit on an unconfigured env so a stray API request (whose
+  /// interceptor calls [idToken]) degrades to "signed out" instead of crashing.
+  bool get _isConfigured =>
+      EnvironmentConfig.cognitoUserPoolId.isNotEmpty &&
+      EnvironmentConfig.cognitoClientId.isNotEmpty;
+
   /// Returns a valid Cognito **ID token** (the API Gateway authorizer + the
   /// handlers read `claims.sub` from it), refreshing silently if needed.
   Future<String?> idToken() async {
+    if (!_isConfigured) return null;
     final user = await _userPool.getCurrentUser();
     if (user == null) return null;
     final session = await user.getSession();
@@ -142,6 +153,7 @@ class CognitoAuthService {
   }
 
   Future<String?> currentSub() async {
+    if (!_isConfigured) return null;
     final user = await _userPool.getCurrentUser();
     final session = await user?.getSession();
     return session?.getIdToken().getSub();

@@ -44,7 +44,7 @@ void main() {
     expect(find.text('Chats'), findsOneWidget);
     expect(find.text('Candice Wue'), findsOneWidget);
     expect(find.text("You: Okay, Let's Go."), findsOneWidget);
-    expect(find.text('3h'), findsOneWidget);
+    expect(find.textContaining('3h'), findsOneWidget);
     // Zahir has an undelivered-read inbound → unread row, no "You:" prefix.
     expect(find.text('Zahir Mays'), findsOneWidget);
     expect(find.text('Whats the plan'), findsOneWidget);

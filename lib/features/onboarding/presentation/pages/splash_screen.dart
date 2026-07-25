@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/auth/cognito_auth_service.dart';
 import '../../../../core/routes/app_router.dart';
+import '../../../../core/services/app_services.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/metafter_logo.dart';
 import '../../../signup/data/signup_draft.dart';
@@ -17,25 +19,38 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  Timer? _timer;
-
   @override
   void initState() {
     super.initState();
-    _timer = Timer(const Duration(milliseconds: 1800), () {
-      if (!mounted) return;
-      // Skip onboarding if the user has already completed signup.
-      final next = SignupDraft.instance.isOnboarded
-          ? AppRouter.home
-          : AppRouter.onboarding;
-      context.go(next);
-    });
+    _decideNext();
   }
 
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
+  /// Routes returning users straight to home. "Logged in" means either the
+  /// legacy onboarded flag is set, OR a real Cognito session survived and a
+  /// local profile exists — the latter covers users whose signup was
+  /// interrupted before the final "Done" (so the flag was never persisted)
+  /// yet who are genuinely authenticated. The session check runs alongside a
+  /// minimum splash delay so the brand mark still shows for a beat.
+  Future<void> _decideNext() async {
+    final results = await Future.wait<Object?>([
+      Future(() async {
+        try {
+          return await CognitoAuthService.instance.isSignedIn();
+        } catch (_) {
+          return false;
+        }
+      }),
+      Future<void>.delayed(const Duration(milliseconds: 1800)),
+    ]);
+    if (!mounted) return;
+
+    final signedIn = results[0] == true;
+    final hasProfile =
+        AppServices.isReady && AppServices.I.profile.profile.value != null;
+    final onboarded = SignupDraft.instance.isOnboarded;
+    final loggedIn = onboarded || (signedIn && hasProfile);
+
+    context.go(loggedIn ? AppRouter.home : AppRouter.onboarding);
   }
 
   @override

@@ -31,7 +31,7 @@ void main() {
     await pumpToHome(tester);
 
     expect(find.text('You are not discoverable'), findsOneWidget);
-    expect(find.text("Let's Go!"), findsOneWidget);
+    expect(find.text('Let’s Go!'), findsOneWidget);
     expect(find.text('Discoverable for the next'), findsOneWidget);
     expect(find.text('Set Distance'), findsOneWidget);
   });
@@ -68,7 +68,7 @@ void main() {
     (services.settings as FakeSettingsRepository).reduceMotion.value = true;
 
     await pumpToHome(tester);
-    await tester.tap(find.text("Let's Go!"));
+    await tester.tap(find.text('Let’s Go!'));
     await tester.pump();
 
     // Meet state is on.

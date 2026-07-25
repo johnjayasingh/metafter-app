@@ -60,11 +60,25 @@ class _HomeShellState extends State<HomeShell>
   /// [AllMessagesScreen] share a single source of truth.
   final ValueNotifier<String> _messagesQuery = ValueNotifier<String>('');
 
+  /// Thread-row swipe-to-archive is only armed once the Messages page is
+  /// (nearly) full-screen. While the page is parked, a horizontal drag on a
+  /// row must page the DECK, as in the demo — a Dismissible would win the
+  /// gesture arena and archive the thread instead.
+  final ValueNotifier<bool> _messagesRowSwipe = ValueNotifier<bool>(false);
+
+  void _syncRowSwipe() {
+    final v = _pagePos.value >= 3.7;
+    if (_messagesRowSwipe.value != v) _messagesRowSwipe.value = v;
+  }
+
   /// Stable embedded bodies — created once so the deck's per-tick side-card
   /// rebuilds never remount their subtrees (single-listener streams inside).
   static const Widget _discoverBody = DiscoverHistoryScreen(embedded: true);
-  late final Widget _messagesBody =
-      AllMessagesScreen(embedded: true, searchQuery: _messagesQuery);
+  late final Widget _messagesBody = AllMessagesScreen(
+    embedded: true,
+    searchQuery: _messagesQuery,
+    rowSwipeEnabled: _messagesRowSwipe,
+  );
 
   /// The listener attached to [_pageAnim] for the in-flight snap animation.
   /// Kept so it can be removed deterministically the moment the animation is
@@ -82,16 +96,21 @@ class _HomeShellState extends State<HomeShell>
     super.initState();
     _pageAnim = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 320),
+      // Settle pace measured from the demo's release animations (~0.4-0.6 s
+      // with a long ease-out tail).
+      duration: const Duration(milliseconds: 420),
     );
+    _pagePos.addListener(_syncRowSwipe);
     _pendingCount = AppServices.I.requests.watchIncomingPendingCount();
   }
 
   @override
   void dispose() {
+    _pagePos.removeListener(_syncRowSwipe);
     _pageAnim.dispose();
     _pagePos.dispose();
     _messagesQuery.dispose();
+    _messagesRowSwipe.dispose();
     super.dispose();
   }
 
@@ -302,7 +321,7 @@ class _HomeShellState extends State<HomeShell>
                 title: 'Discover',
                 chevron: _SideChevron.right,
                 expand: expand,
-                peekInsetFrac: 0.30,
+                peekInsetFrac: 0.26,
                 onBack: () => _goToPage(_homeIndex),
                 onExpand: () => _goToPage(_discoverFullIndex),
                 child: _discoverBody,
@@ -371,11 +390,20 @@ class _CardDeckState extends State<_CardDeck> {
   static const double _cardRadius = 28;
 
   /// Home card scale when parked as the edge peek (measured from the demo).
-  static const double _peekScale = 0.70;
+  static const double _peekScale = 0.65;
 
   /// Home card travel into its peek slot, as a fraction of width — leaves
   /// ~24% of the card visible at the screen edge.
-  static const double _peekShift = 0.61;
+  static const double _peekShift = 0.585;
+
+  /// Side pages barely travel — they sit at their parked position with this
+  /// small parallax offset while the Home card does the full drag distance
+  /// (demo: the incoming page is revealed, not slid in).
+  static const double _sideParallax = 0.10;
+
+  /// Side pages start this much ghosted and solidify as they are revealed
+  /// (demo f0058: the incoming Messages list reads ~half strength mid-drag).
+  static const double _sideFade = 0.45;
 
   /// Extra travel that slides the peek stack fully off-screen while a side
   /// page expands to full-screen.
@@ -384,8 +412,11 @@ class _CardDeckState extends State<_CardDeck> {
   /// The grey far-page ghost peeks out from behind Home by this much.
   static const double _ghostShift = 0.06;
 
+  /// Tight, downward-biased shadows — in the demo the stack's shadow reads
+  /// only along the cards' sides, with no halo above the top edge.
   static const List<BoxShadow> _cardShadow = [
-    BoxShadow(color: Color(0x33000000), blurRadius: 22, offset: Offset(0, 4)),
+    BoxShadow(color: Color(0x16000000), blurRadius: 24, offset: Offset(0, 8)),
+    BoxShadow(color: Color(0x0C000000), blurRadius: 8, offset: Offset(0, 2)),
   ];
 
   double _startPos = 2;
@@ -427,6 +458,14 @@ class _CardDeckState extends State<_CardDeck> {
               final dir = p < 2 ? 1.0 : -1.0;
               final scale = 1.0 - (1.0 - _peekScale) * t1;
               final tx = dir * w * (_peekShift * t1 + _expandShift * expand);
+              // The card scales down but its corners must READ as the same
+              // radius as the full-screen card (demo peek stays round) —
+              // compensate the layout radius for the visual scale.
+              final radius = _cardRadius / scale;
+              // SafeArea shifts the deck down; nudge the parked peek back up
+              // so its top lands where the demo's does.
+              final topPad = MediaQuery.of(context).padding.top;
+              final ty = -topPad * (1.0 - scale) * t1;
               // The ghost fades in late so it never flashes mid-drag.
               final ghostOpacity = ((t1 - 0.35) / 0.65).clamp(0.0, 1.0);
               return Stack(
@@ -446,16 +485,24 @@ class _CardDeckState extends State<_CardDeck> {
                           : Colors.white,
                     ),
                   ),
-                  // Side pages slide in UNDER the Home card.
+                  // Side pages are REVEALED under the Home card: they wait at
+                  // their parked position (small parallax offset, ghosted)
+                  // while the Home card does the full drag travel (demo
+                  // f0012/f0058 — the incoming page barely moves and fades
+                  // from ~half strength to solid as the card slides away).
                   if (p < 2)
                     Positioned(
                       key: const ValueKey('deck-discover'),
                       top: 0,
                       bottom: 0,
                       width: w,
-                      left: -w * (p - 1).clamp(0.0, 1.0),
-                      child: _frame(
-                        widget.discoverBuilder((1 - p).clamp(0.0, 1.0)),
+                      left: -w * _sideParallax * (p - 1).clamp(0.0, 1.0),
+                      child: Opacity(
+                        opacity:
+                            1.0 - _sideFade * (p - 1).clamp(0.0, 1.0),
+                        child: _frame(
+                          widget.discoverBuilder((1 - p).clamp(0.0, 1.0)),
+                        ),
                       ),
                     ),
                   if (p > 2)
@@ -464,9 +511,13 @@ class _CardDeckState extends State<_CardDeck> {
                       top: 0,
                       bottom: 0,
                       width: w,
-                      left: w * (3 - p).clamp(0.0, 1.0),
-                      child: _frame(
-                        widget.messagesBuilder((p - 3).clamp(0.0, 1.0)),
+                      left: w * _sideParallax * (3 - p).clamp(0.0, 1.0),
+                      child: Opacity(
+                        opacity:
+                            1.0 - _sideFade * (3 - p).clamp(0.0, 1.0),
+                        child: _frame(
+                          widget.messagesBuilder((p - 3).clamp(0.0, 1.0)),
+                        ),
                       ),
                     ),
                   // Grey "far page" ghost — the deck's depth cue, peeking out
@@ -479,14 +530,16 @@ class _CardDeckState extends State<_CardDeck> {
                           opacity: ghostOpacity,
                           child: Transform.translate(
                             offset: Offset(
-                                tx - dir * w * _ghostShift * t1, 0),
+                                tx - dir * w * _ghostShift * t1, ty),
                             child: Transform.scale(
-                              scale: scale * 1.04,
+                              scale: scale * 1.02,
                               child: DecoratedBox(
+                                // A white card, like the demo — it reads grey
+                                // only where the Home card's shadow falls.
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFE4E4E4),
+                                  color: const Color(0xFFF6F6F6),
                                   borderRadius:
-                                      BorderRadius.circular(_cardRadius),
+                                      BorderRadius.circular(radius),
                                   boxShadow: _cardShadow,
                                 ),
                               ),
@@ -500,7 +553,7 @@ class _CardDeckState extends State<_CardDeck> {
                   Positioned.fill(
                     key: const ValueKey('deck-home'),
                     child: Transform.translate(
-                      offset: Offset(tx, 0),
+                      offset: Offset(tx, ty),
                       child: Transform.scale(
                         scale: scale,
                         child: GestureDetector(
@@ -510,17 +563,15 @@ class _CardDeckState extends State<_CardDeck> {
                             child: DecoratedBox(
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.vertical(
-                                  top: const Radius.circular(_cardRadius),
-                                  bottom:
-                                      Radius.circular(_cardRadius * t1),
+                                  top: Radius.circular(radius),
+                                  bottom: Radius.circular(radius * t1),
                                 ),
                                 boxShadow: _cardShadow,
                               ),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.vertical(
-                                  top: const Radius.circular(_cardRadius),
-                                  bottom:
-                                      Radius.circular(_cardRadius * t1),
+                                  top: Radius.circular(radius),
+                                  bottom: Radius.circular(radius * t1),
                                 ),
                                 child: widget.home,
                               ),
@@ -619,15 +670,39 @@ class _HomeCard extends StatelessWidget {
             immersive: immersive,
           ),
           Expanded(
-            child: _DiscoverCard(
-              photoPath: photoPath,
-              sessionState: sessionState,
-              pendingCount: pendingCount,
-              onStart: onStart,
-              onEnd: onEnd,
-              onGear: onGear,
-              onPersonTap: onPersonTap,
-              onOpenSheet: onOpenSheet,
+            child: Stack(
+              children: [
+                // Stacked-deck depth cue (demo): a light card peeking above
+                // the gradient card, inset from both sides.
+                Positioned(
+                  top: 0,
+                  left: 26,
+                  right: 26,
+                  bottom: 0,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: immersive
+                          ? const Color(0xFF2A2A2A)
+                          : const Color(0xFFECECEC),
+                      borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(24)),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: _DiscoverCard(
+                    photoPath: photoPath,
+                    sessionState: sessionState,
+                    pendingCount: pendingCount,
+                    onStart: onStart,
+                    onEnd: onEnd,
+                    onGear: onGear,
+                    onPersonTap: onPersonTap,
+                    onOpenSheet: onOpenSheet,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -764,21 +839,23 @@ class _SideHeaderState extends State<_SideHeader> {
     final left = widget.chevron == _SideChevron.left;
     final hasSearch = widget.searchQuery != null;
 
-    // The big parked title (below the chevron, inset from the peek) morphs
-    // into a compact `‹ Title` row as the page expands to full-screen.
-    final titleSize = lerpDouble(44, 20, e)!;
-    final titleTop = lerpDouble(52, 11, e)!;
+    // The big parked title sits LOW on the page — the demo leaves ~165pt of
+    // whitespace between the chevron row and the title (f0023/f0070: title
+    // ~26% down the screen). Expanding slides it up beside the chevron,
+    // staying large, like the demo's full Messages view (f0097).
+    final titleSize = lerpDouble(44, 40, e)!;
+    final titleTop = lerpDouble(164, 8, e)!;
     final titleLeft =
-        left ? lerpDouble(widget.inset + 20, 46, e)! : 20.0;
+        left ? lerpDouble(widget.inset + 20, 56, e)! : 20.0;
 
     final header = SizedBox(
-      height: lerpDouble(112, 46, e)!,
+      height: lerpDouble(228, 64, e)!,
       width: double.infinity,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
           Positioned(
-            top: 0,
+            top: lerpDouble(0, 6, e)!,
             left: left ? 0 : null,
             right: left ? null : 0,
             child: IconButton(
@@ -976,15 +1053,23 @@ class _PageTitleStrip extends StatelessWidget {
         builder: (context, raw, _) {
           // The deck axis is 0..4; the strip's three titles live on the
           // 1..3 span (Discover · Home · Messages) — shift into title space.
-          final page = (raw - 1.0).clamp(0.0, 2.0);
+          // The strip belongs to the HOME card: as the deck parks, the strip
+          // eases back to Home-centred so the peek always reads "Home"
+          // (demo f0023/f0070 — the parked sliver shows Home's edge glyphs,
+          // never the side page's title, which lives on the side page).
+          final deckT = (raw - 2.0).abs().clamp(0.0, 1.0);
+          final page =
+              lerpDouble((raw - 1.0).clamp(0.0, 2.0), 1.0, deckT)!;
           return LayoutBuilder(
             builder: (context, c) {
-              final spacing = c.maxWidth * 0.46;
+              // Neighbour titles sit mostly off-screen — only a clipped
+              // fragment shows at each edge (demo f0001: "…over" / "Mes…").
+              final spacing = c.maxWidth * 0.54;
               return ClipRect(
                 child: Stack(
                   children: [
                     for (var i = 0; i < titles.length; i++)
-                      _buildTitle(i, page, spacing),
+                      _buildTitle(i, page, deckT, spacing),
                   ],
                 ),
               );
@@ -995,26 +1080,33 @@ class _PageTitleStrip extends StatelessWidget {
     );
   }
 
-  Widget _buildTitle(int i, double page, double spacing) {
+  Widget _buildTitle(int i, double page, double deckT, double spacing) {
     final dist = (i - page).abs().clamp(0.0, 1.0);
-    // Active title contrasts with the surface; neighbours fade to grey.
+    // Active title contrasts with the surface; neighbours are the same
+    // large cut-off ghosts as the demo — solid grey, near-full size.
     final active = immersive ? Colors.white : Colors.black;
+    // The neighbour ghosts belong to the SETTLED Home state. Mid-drag the
+    // incoming page's own header is the visible title (demo f0058 shows no
+    // strip preview on the card), so the ghosts fade out early in the drag;
+    // only the Home title rides the card into its peek.
+    final ghost = (1.0 - 2.5 * deckT).clamp(0.0, 1.0);
+    final opacity = i == 1 ? 1.0 : ghost;
     return Positioned.fill(
       child: Transform.translate(
         offset: Offset((i - page) * spacing, 0),
         child: Center(
           child: Opacity(
-            opacity: (1.0 - 0.5 * dist).clamp(0.0, 1.0),
+            opacity: opacity,
             child: Text(
               titles[i],
               maxLines: 1,
               softWrap: false,
               overflow: TextOverflow.visible,
               style: TextStyle(
-                fontSize: 32.0 - 9.0 * dist,
+                fontSize: 40.0 - 4.0 * dist,
                 fontWeight: FontWeight.w800,
                 letterSpacing: -0.5,
-                color: Color.lerp(active, const Color(0xFF8A9096), dist),
+                color: Color.lerp(active, const Color(0xFFB4B8BB), dist),
               ),
             ),
           ),
@@ -1051,11 +1143,18 @@ class _DiscoverCard extends StatelessWidget {
   final void Function(NearbyPeer) onPersonTap;
   final VoidCallback onOpenSheet;
 
+  // Stays essentially pure black for the top quarter before warming toward
+  // the brand red (demo f0001 — the red only reads in the lower half).
   static const _idleGradient = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
-    stops: [0.0, 0.42, 1.0],
-    colors: [Colors.black, Color(0xFF5E0F13), AppColors.brandRed],
+    stops: [0.0, 0.25, 0.62, 1.0],
+    colors: [
+      Colors.black,
+      Color(0xFF190405),
+      Color(0xFF5E0F13),
+      AppColors.brandRed,
+    ],
   );
   static const _meetGradient = LinearGradient(
     begin: Alignment.topCenter,
@@ -1130,7 +1229,10 @@ class _DiscoverCard extends StatelessWidget {
   Widget _buildIdle(BuildContext context, int pending, bool reduceMotion) {
     final settings = AppServices.I.settings;
     final starting = sessionState is SessionStarting;
-    return Column(
+    // Scroll-safe: on very short viewports the fixed spacings exceed the
+    // card, so the column clamps into a scrollable instead of overflowing.
+    // At phone heights the scrollview has no extent and is inert.
+    final column = Column(
       children: [
         const SizedBox(height: 40),
         ValueListenableBuilder<MoodRing>(
@@ -1158,7 +1260,7 @@ class _DiscoverCard extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: _LetsGoButton(
-            label: starting ? 'Starting…' : "Let's Go!",
+            label: starting ? 'Starting…' : 'Let’s Go!',
             onPressed: starting ? null : onStart,
           ),
         ),
@@ -1202,6 +1304,15 @@ class _DiscoverCard extends StatelessWidget {
         ),
         SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
       ],
+    );
+    return LayoutBuilder(
+      builder: (context, c) => SingleChildScrollView(
+        physics: const ClampingScrollPhysics(),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: c.maxHeight),
+          child: IntrinsicHeight(child: column),
+        ),
+      ),
     );
   }
 
@@ -1851,6 +1962,10 @@ class _DarkSettingRow extends StatelessWidget {
   Widget build(BuildContext context) {
     // A persisted value outside the preset list must still render.
     final items = options.contains(value) ? options : [value, ...options];
+    // DropdownButton REPLACES the ambient DefaultTextStyle with its `style`,
+    // so the brand font family must be re-stated or the value falls back to
+    // the platform font.
+    final family = DefaultTextStyle.of(context).style.fontFamily;
     return Row(
       children: [
         Expanded(
@@ -1870,7 +1985,8 @@ class _DarkSettingRow extends StatelessWidget {
             dropdownColor: const Color(0xFF222222),
             icon: const Icon(Icons.keyboard_arrow_down_rounded,
                 color: Colors.white),
-            style: const TextStyle(
+            style: TextStyle(
+              fontFamily: family,
               fontSize: 15,
               fontWeight: FontWeight.w700,
               color: Colors.white,
@@ -1881,7 +1997,8 @@ class _DarkSettingRow extends StatelessWidget {
                 .map((o) => DropdownMenuItem(
                       value: o,
                       child: Text(o,
-                          style: const TextStyle(
+                          style: TextStyle(
+                              fontFamily: family,
                               color: Colors.white,
                               fontWeight: FontWeight.w700)),
                     ))

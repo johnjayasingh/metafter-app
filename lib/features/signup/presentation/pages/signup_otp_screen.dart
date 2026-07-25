@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -18,8 +20,16 @@ class SignupOtpScreen extends StatefulWidget {
 
 class _SignupOtpScreenState extends State<SignupOtpScreen> {
   static const int _length = 6;
+
+  /// Seconds before "Resend" becomes tappable again after a send.
+  static const int _resendCooldownSeconds = 30;
+
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
+
+  Timer? _cooldownTimer;
+  int _cooldown = _resendCooldownSeconds;
+  bool _resending = false;
 
   @override
   void initState() {
@@ -28,16 +38,63 @@ class _SignupOtpScreenState extends State<SignupOtpScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
     });
+    // A code was just sent by the previous screen — start the cooldown.
+    _startCooldown();
   }
 
   @override
   void dispose() {
+    _cooldownTimer?.cancel();
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
   bool _verifying = false;
+
+  void _startCooldown() {
+    _cooldownTimer?.cancel();
+    setState(() => _cooldown = _resendCooldownSeconds);
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return t.cancel();
+      setState(() {
+        if (_cooldown > 0) _cooldown--;
+        if (_cooldown == 0) t.cancel();
+      });
+    });
+  }
+
+  /// Re-runs the CUSTOM_AUTH challenge for the same number — the backend
+  /// Lambda sends a fresh SMS and [CognitoAuthService.answerOtp] validates
+  /// against the new code.
+  Future<void> _onResend() async {
+    if (_cooldown > 0 || _resending || _verifying) return;
+    final draft = SignupDraft.instance;
+    final e164 = '${draft.countryCode}${draft.phone}';
+    setState(() => _resending = true);
+    try {
+      await CognitoAuthService.instance.startSignIn(e164);
+      if (!mounted) return;
+      _controller.clear();
+      _focusNode.requestFocus();
+      _startCooldown();
+      _showError('New code sent to ${draft.countryCode} ${draft.phone}.');
+    } catch (_) {
+      if (mounted) _showError('Could not resend the code. Try again.');
+    } finally {
+      if (mounted) setState(() => _resending = false);
+    }
+  }
+
+  /// Back to the phone-entry screen; the draft keeps the typed number so the
+  /// user only edits what's wrong.
+  void _onChangeNumber() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go(AppRouter.signupBasics);
+    }
+  }
 
   String get _code => _controller.text;
 
@@ -62,8 +119,9 @@ class _SignupOtpScreenState extends State<SignupOtpScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -98,74 +156,130 @@ class _SignupOtpScreenState extends State<SignupOtpScreen> {
         label: _verifying ? 'Verifying…' : 'Continue',
         onPressed: (_complete && !_verifying) ? _onContinue : null,
       ),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => _focusNode.requestFocus(),
-        child: Stack(
-          children: [
-            // Visible UI: a single grey pill split into 6 cells.
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEAEBEC),
-                borderRadius: BorderRadius.circular(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _otpField(),
+          const SizedBox(height: 22),
+          Row(
+            children: [
+              const Text(
+                "Didn't get the code?",
+                style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
               ),
-              child: AnimatedBuilder(
-                animation: Listenable.merge([_controller, _focusNode]),
-                builder: (context, _) {
-                  return Row(
-                    children: List.generate(_length, (i) {
-                      final digits = _controller.text;
-                      final char = i < digits.length ? digits[i] : '';
-                      final isCurrent = _focusNode.hasFocus &&
-                          i == digits.length.clamp(0, _length - 1) &&
-                          digits.length < _length;
-                      return Expanded(
-                        child: SizedBox(
-                          height: 24,
-                          child: Center(
-                            child: char.isNotEmpty
-                                ? Text(
-                                    char,
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.textPrimary,
-                                    ),
-                                  )
-                                : (isCurrent
-                                    ? const _BlinkingCursor()
-                                    : const SizedBox.shrink()),
-                          ),
-                        ),
-                      );
-                    }),
-                  );
-                },
-              ),
-            ),
-            // Invisible TextField captures keyboard input.
-            Positioned.fill(
-              child: Opacity(
-                opacity: 0,
-                child: TextField(
-                  controller: _controller,
-                  focusNode: _focusNode,
-                  keyboardType: TextInputType.number,
-                  maxLength: _length,
-                  showCursor: false,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    counterText: '',
-                    border: InputBorder.none,
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: _onResend,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Text(
+                    _resending
+                        ? 'Sending…'
+                        : (_cooldown > 0
+                              ? 'Resend in ${_cooldown}s'
+                              : 'Resend code'),
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: (_cooldown == 0 && !_resending)
+                          ? AppColors.brandRed
+                          : AppColors.textSecondary,
+                    ),
                   ),
-                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: _onChangeNumber,
+            behavior: HitTestBehavior.opaque,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 6),
+              child: Text(
+                'Change number',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.brandRed,
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _otpField() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _focusNode.requestFocus(),
+      child: Stack(
+        children: [
+          // Visible UI: a single grey pill split into 6 cells.
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEAEBEC),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: AnimatedBuilder(
+              animation: Listenable.merge([_controller, _focusNode]),
+              builder: (context, _) {
+                return Row(
+                  children: List.generate(_length, (i) {
+                    final digits = _controller.text;
+                    final char = i < digits.length ? digits[i] : '';
+                    final isCurrent =
+                        _focusNode.hasFocus &&
+                        i == digits.length.clamp(0, _length - 1) &&
+                        digits.length < _length;
+                    return Expanded(
+                      child: SizedBox(
+                        height: 24,
+                        child: Center(
+                          child: char.isNotEmpty
+                              ? Text(
+                                  char,
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                )
+                              : (isCurrent
+                                    ? const _BlinkingCursor()
+                                    : const SizedBox.shrink()),
+                        ),
+                      ),
+                    );
+                  }),
+                );
+              },
+            ),
+          ),
+          // Invisible TextField captures keyboard input.
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0,
+              child: TextField(
+                controller: _controller,
+                focusNode: _focusNode,
+                keyboardType: TextInputType.number,
+                maxLength: _length,
+                showCursor: false,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  counterText: '',
+                  border: InputBorder.none,
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

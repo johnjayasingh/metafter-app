@@ -100,8 +100,10 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
               const Expanded(
                 child: Text(
                   'People You Crossed Paths',
+                  // 18pt keeps this on a single line even when the page is
+                  // parked beside the Home peek (demo shows one line).
                   style: TextStyle(
-                    fontSize: 20,
+                    fontSize: 18,
                     fontWeight: FontWeight.w800,
                     color: Colors.black,
                   ),
@@ -137,7 +139,7 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
             child: Text(
               TimeFormat.dateBand(_day),
               style: const TextStyle(
-                fontSize: 15,
+                fontSize: 18,
                 fontWeight: FontWeight.w700,
                 color: AppColors.brandRed,
               ),
@@ -198,27 +200,33 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
     return ListView.separated(
       padding: const EdgeInsets.only(bottom: 24),
       itemCount: rows.length,
-      separatorBuilder: (_, _) => const Divider(
-          height: 1, indent: 148, endIndent: 20, color: Color(0xFFF0F0F0)),
+      // Whitespace-only separation, like the demo timeline.
+      separatorBuilder: (_, _) => const SizedBox.shrink(),
       itemBuilder: (context, index) {
         final e = rows[index];
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          child: Row(
-            children: [
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          child: LayoutBuilder(builder: (context, c) {
+            // Parked beside the Home peek the row is too narrow for the
+            // Connect pill (and the demo's parked timeline shows none) —
+            // it appears once the page expands toward full width. Rows stay
+            // tappable either way (profile view carries its own Connect).
+            final showPill = c.maxWidth >= 300;
+            return Row(
+              children: [
               SizedBox(
-                width: 60,
+                width: 52,
                 child: Text(
                   TimeFormat.clock(e.lastSeen, use24h: use24h),
                   style:
-                      const TextStyle(fontSize: 12, color: Color(0xFF8A8A8A)),
+                      const TextStyle(fontSize: 13, color: Color(0xFF8A8A8A)),
                 ),
               ),
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: () => _openProfile(e),
                 child:
-                    PeerAvatar(card: e.card, size: 52, showVerified: true),
+                    PeerAvatar(card: e.card, size: 56, showVerified: true),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -233,7 +241,7 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 15,
+                          fontSize: 17,
                           fontWeight: FontWeight.w700,
                           color: Colors.black,
                         ),
@@ -245,23 +253,26 @@ class _DiscoverHistoryScreenState extends State<DiscoverHistoryScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontSize: 13, color: Color(0xFF6B6B6B)),
+                            fontSize: 14, color: Color(0xFF6B6B6B)),
                       ),
                       Text(
                         e.card.company,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontSize: 13, color: Color(0xFF6B6B6B)),
+                            fontSize: 14, color: Color(0xFF6B6B6B)),
                       ),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              _ConnectPill(encounter: e, onConnect: () => _connect(e)),
-            ],
-          ),
+                if (showPill) ...[
+                  const SizedBox(width: 8),
+                  _ConnectPill(encounter: e, onConnect: () => _connect(e)),
+                ],
+              ],
+            );
+          }),
         );
       },
     );

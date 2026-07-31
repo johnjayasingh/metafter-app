@@ -446,6 +446,18 @@ TextStyle _titleStyle({required double size, required Color color}) => TextStyle
   return (size: painter.size, top: capTop - (baseline - capHeight));
 }
 
+/// The gradient card's copy, straight off Figma — all Instrument Sans, cap
+/// trimmed, 120% line height, white. Headline 24 SemiBold; body and the
+/// setting-row labels 16 Regular.
+final TextStyle _kCardHeadlineStyle = _titleStyle(
+  size: 24,
+  color: Colors.white,
+);
+final TextStyle _kCardBodyStyle = _titleStyle(
+  size: 16,
+  color: Colors.white,
+).copyWith(fontWeight: FontWeight.w400);
+
 /// Fraction of the width each parked side page cedes to the Home peek stack
 /// (measured from the demo — slightly wider on Messages than Discover).
 const double _kDiscoverPeekInset = 0.26;
@@ -1416,7 +1428,10 @@ class _DiscoverCard extends StatelessWidget {
     // At phone heights the scrollview has no extent and is inert.
     final column = Column(
       children: [
-        const SizedBox(height: 40),
+        // Figma: the avatar sits 60 below the card top and its cap-to-cap
+        // gaps below are 69 (headline) and 17 (subtitle) — the old 26/6 read
+        // as cramped because they were box gaps, not cap gaps.
+        const SizedBox(height: 60),
         ValueListenableBuilder<MoodRing>(
           valueListenable: settings.mood,
           builder: (context, mood, _) => _CenterAvatar(
@@ -1425,21 +1440,12 @@ class _DiscoverCard extends StatelessWidget {
             onGear: onGear,
           ),
         ),
-        const SizedBox(height: 26),
-        const Text(
-          'You are not discoverable',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 23,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-          ),
-        ),
-        const SizedBox(height: 6),
-        const Text(
+        const SizedBox(height: 69),
+        _CapText('You are not discoverable', style: _kCardHeadlineStyle),
+        const SizedBox(height: 17),
+        _CapText(
           'Tap to connect with people nearby',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14, color: Color(0xFFE7D2D3)),
+          style: _kCardBodyStyle,
         ),
         const SizedBox(height: 26),
         Padding(
@@ -1521,16 +1527,11 @@ class _DiscoverCard extends StatelessWidget {
             ),
           ),
         ),
-        Text(
+        _CapText(
           state.incognito
               ? 'You are in incognito mode'
               : 'You are discoverable',
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontSize: 23,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-          ),
+          style: _kCardHeadlineStyle,
         ),
         const SizedBox(height: 6),
         _CountdownText(
@@ -2085,18 +2086,29 @@ class _CenterAvatar extends StatelessWidget {
   final Color ringColor;
   final VoidCallback onGear;
 
+  /// Figma "Ellipse 1": 107.68 across, 3pt inner ring, and a soft blue-grey
+  /// drop shadow (0 / 12.91, blur 25.81, #4F5174 at 25%).
+  static const double diameter = 107.68;
+
   @override
   Widget build(BuildContext context) {
     return Stack(
       alignment: Alignment.bottomRight,
       children: [
         Container(
-          width: 112,
-          height: 112,
+          width: diameter,
+          height: diameter,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            border: Border.all(color: ringColor, width: 4),
+            border: Border.all(color: ringColor, width: 3),
             color: Colors.white,
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x404F5174),
+                offset: Offset(0, 12.91),
+                blurRadius: 25.81,
+              ),
+            ],
           ),
           child: ClipOval(
             child: photoPath != null
@@ -2110,18 +2122,54 @@ class _CenterAvatar extends StatelessWidget {
         ),
         GestureDetector(
           onTap: onGear,
+          // Figma: a 24 blue disc carrying an 18.86 × 20 gear at 1.5pt — the
+          // ring around it was the app's own addition and reads as bulk at
+          // this size.
           child: Container(
             margin: const EdgeInsets.only(right: 2, bottom: 2),
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
+            width: 24,
+            height: 24,
+            decoration: const BoxDecoration(
               color: AppColors.discoverActive,
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
             ),
-            child: const Icon(Icons.settings, size: 15, color: Colors.white),
+            child: const Center(
+              child: Icon(Icons.settings, size: 19, color: Colors.white),
+            ),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Text laid out on its CAP box, so the space above and below it in a column
+/// is the space the design specifies. Figma trims every one of these to cap
+/// height, and the font's line box is 8-12pt taller than that — stacking the
+/// raw [Text] silently pads each gap by that leftover.
+class _CapText extends StatelessWidget {
+  const _CapText(this.text, {required this.style});
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final metrics = _titleMetrics(context, text, style, 0);
+    return SizedBox(
+      width: double.infinity,
+      height: style.fontSize! * _kCapHeightRatio,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            top: metrics.top,
+            left: 0,
+            right: 0,
+            child: Text(text, textAlign: TextAlign.center, style: style),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2135,6 +2183,50 @@ class _AvatarFallback extends StatelessWidget {
       child: Icon(Icons.person, size: 56, color: AppColors.brandRed),
     );
   }
+}
+
+/// The design's dropdown chevron: a 16-wide V drawn at 1.5pt. Material's
+/// `keyboard_arrow_down` is a 2pt stroke on a 24 box, which reads far heavier
+/// than the hairline in the design.
+class _ChevronDown extends StatelessWidget {
+  const _ChevronDown();
+
+  static const double _width = 16;
+
+  @override
+  Widget build(BuildContext context) {
+    return const CustomPaint(
+      size: Size(_width, _width * 0.5),
+      painter: _ChevronDownPainter(Colors.white),
+    );
+  }
+}
+
+class _ChevronDownPainter extends CustomPainter {
+  const _ChevronDownPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    canvas.drawPath(
+      Path()
+        ..moveTo(w * 0.08, h * 0.28)
+        ..lineTo(w * 0.5, h * 0.76)
+        ..lineTo(w * 0.92, h * 0.28),
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ChevronDownPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
 
 /// A "label … value ⌄" row styled for the dark card (white label + value).
@@ -2161,29 +2253,21 @@ class _DarkSettingRow extends StatelessWidget {
     final family = DefaultTextStyle.of(context).style.fontFamily;
     return Row(
       children: [
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w500,
-              color: Colors.white,
-            ),
-          ),
-        ),
+        Expanded(child: Text(label, style: _kCardBodyStyle)),
         DropdownButtonHideUnderline(
           child: DropdownButton<String>(
             value: value,
             isDense: true,
+            // The button is as wide as the LONGEST option ('30 min'), so the
+            // default centerStart alignment leaves the current value floating
+            // left of the chevron instead of flush against it.
+            alignment: AlignmentDirectional.centerEnd,
             dropdownColor: const Color(0xFF222222),
-            icon: const Icon(
-              Icons.keyboard_arrow_down_rounded,
-              color: Colors.white,
-            ),
+            icon: const _ChevronDown(),
             style: TextStyle(
               fontFamily: family,
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
               color: Colors.white,
               decoration: TextDecoration.underline,
               decorationColor: Colors.white,

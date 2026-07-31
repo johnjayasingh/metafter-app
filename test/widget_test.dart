@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:metafter/core/proximity/simulated_proximity_engine.dart';
 import 'package:metafter/core/routes/app_router.dart';
@@ -17,6 +19,13 @@ void main() {
   });
 
   Future<void> pumpToHome(WidgetTester tester) async {
+    // The shell is laid out to a 393 × 852 phone frame (Figma). On the test
+    // default of 800 × 600 the card's lower rows fall outside the viewport,
+    // and opening a dropdown there trips a layout assert inside Flutter's
+    // own dropdown route — an artefact of the surface, not of the app.
+    tester.view.physicalSize = const Size(393 * 3, 852 * 3);
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(const MetafterApp());
     // AppRouter.router is a process-wide singleton, so force the location
     // instead of relying on the splash timer state of earlier tests.

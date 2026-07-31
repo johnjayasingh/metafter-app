@@ -310,16 +310,18 @@ class _HomeShellState extends State<HomeShell>
             child: _CardDeck(
               position: _pagePos,
               immersive: immersive,
+              homeTitle: active ? 'Meet' : 'Home',
               onDragStart: () {
                 _detachPageListener();
                 _pageAnim.stop();
               },
               onSnap: _goToPage,
               onHomeTap: () => _goToPage(_homeIndex),
+              onExpandDiscover: () => _goToPage(_discoverFullIndex),
+              onExpandMessages: () => _goToPage(_messagesFullIndex),
               // Home hub — the frontmost deck card. Carries its own header +
               // peeking neighbour-title preview over the Home/Meet gradient.
               home: _HomeCard(
-                position: _pagePos,
                 immersive: immersive,
                 active: active,
                 sessionState: sessionState,
@@ -337,21 +339,17 @@ class _HomeShellState extends State<HomeShell>
               // Side pages slide in under the Home card; each lays out around
               // the parked Home peek and can expand to a true full screen.
               discoverBuilder: (expand) => _SideCard(
-                title: 'Discover',
                 chevron: _SideChevron.right,
                 expand: expand,
-                peekInsetFrac: 0.26,
+                peekInsetFrac: _kDiscoverPeekInset,
                 onBack: () => _goToPage(_homeIndex),
-                onExpand: () => _goToPage(_discoverFullIndex),
                 trailing: DiscoverViewToggle(gridMode: _discoverGrid),
                 child: _discoverBody,
               ),
               messagesBuilder: (expand) => _SideCard(
-                title: 'Messages',
                 chevron: _SideChevron.left,
                 expand: expand,
                 onBack: () => _goToPage(_homeIndex),
-                onExpand: () => _goToPage(_messagesFullIndex),
                 child: _messagesBody,
               ),
             ),
@@ -361,6 +359,102 @@ class _HomeShellState extends State<HomeShell>
     );
   }
 }
+
+// ─── Shared title geometry ───────────────────────────────────────────────────
+
+// The Home card's title strip and a side page's big title are the SAME visual
+// object across a transition: the neighbour ghost in the strip hands off to the
+// page's own title, which starts life exactly on top of it (demo f0002→f0014 —
+// the ghost never rides away with the Home card). Both sides resolve the band,
+// size, colour and slot from these constants so the hand-off lands frame-exact.
+
+/// Figma's "Home Page" frame measures y from the screen top; the SafeArea
+/// already supplies this much of it, so every spec below is quoted absolute
+/// and reduced by it.
+const double _kSafeTop = 59;
+
+/// Height of [_SharedHeader] — Padding(8, …, 2) around a 48pt icon row.
+const double _kSharedHeaderHeight = 58;
+
+/// Figma anchors the titles by CAP top, not by line box (vertical trim: cap
+/// height), so they are placed through [_titleMetrics] rather than centred.
+/// Nav titles: cap top 146, content ("Rectangle 3593") top 216 — the 39pt
+/// between them is the breathing room the strip has to reserve.
+const double _kTitleCapTop = 146 - _kSafeTop;
+const double _kContentTop = 216 - _kSafeTop;
+const double _kTitleStripHeight = _kContentTop - _kSharedHeaderHeight;
+
+/// Figma: Instrument Sans SemiBold 600, 42.92px, line height 120%, letter
+/// spacing 0. A 42.92px title measures 31px cap-to-baseline.
+const double _kTitleSize = 42.92;
+const double _kTitleLineHeight = 1.2;
+const double _kCapHeightRatio = 31 / 42.92;
+const Color _kGhostTitleColor = Color(0xFFBEC0C2);
+
+/// Gap between adjacent titles — Figma lays them out as one centred row
+/// ("Discover" ends 56 before "Home" starts), so the neighbours' slots fall
+/// out of the centre title's width rather than a fixed fraction.
+const double _kTitleGap = 56;
+
+/// Parked page title: same 42.92 face, low on the page (Figma cap top 231).
+const double _kPageTitleCapTop = 231 - _kSafeTop;
+const double _kPageTitleLeft = 20;
+
+/// Full-screen page title: the compact `‹ Title` app-bar row — 18pt beside the
+/// back chevron, cap top 70 absolute.
+const double _kFullTitleSize = 18;
+const double _kFullTitleCapTop = 70 - _kSafeTop;
+const double _kFullTitleLeft = 56;
+
+/// The deck's shared title face. Only the size and colour move.
+TextStyle _titleStyle({required double size, required Color color}) => TextStyle(
+  // Pin the BUNDLED family: the ambient DefaultTextStyle is a google_fonts
+  // style whose family is a runtime *regular* variant, so inheriting it would
+  // leave w600 to be faked instead of using the real SemiBold face (see the
+  // note on AppTheme.lightTheme's fontFamily).
+  fontFamily: 'InstrumentSans',
+  fontSize: size,
+  height: _kTitleLineHeight,
+  fontWeight: FontWeight.w600,
+  letterSpacing: 0,
+  color: color,
+);
+
+/// Lays [text] out in [style] and returns its box plus the `top` that puts its
+/// cap top on [capTop] — Figma's numbers are cap-top, Flutter's are box-top.
+({Size size, double top}) _titleMetrics(
+  BuildContext context,
+  String text,
+  TextStyle style,
+  double capTop,
+) {
+  final painter =
+      TextPainter(
+          text: TextSpan(
+            text: text,
+            style: DefaultTextStyle.of(context).style.merge(style),
+          ),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+          maxLines: 1,
+        )
+        ..layout();
+  final baseline = painter.computeDistanceToActualBaseline(
+    TextBaseline.alphabetic,
+  );
+  final capHeight = (style.fontSize ?? 0) * _kCapHeightRatio;
+  return (size: painter.size, top: capTop - (baseline - capHeight));
+}
+
+/// Fraction of the width each parked side page cedes to the Home peek stack
+/// (measured from the demo — slightly wider on Messages than Discover).
+const double _kDiscoverPeekInset = 0.26;
+const double _kMessagesPeekInset = 0.36;
+
+/// Side pages barely travel — they sit at their parked position with this
+/// small parallax offset while the Home card does the full drag distance
+/// (demo: the incoming page is revealed, not slid in).
+const double _kSideParallax = 0.10;
 
 // ─── Card deck ────────────────────────────────────────────────────────────────
 
@@ -374,9 +468,12 @@ class _CardDeck extends StatefulWidget {
   const _CardDeck({
     required this.position,
     required this.immersive,
+    required this.homeTitle,
     required this.home,
     required this.discoverBuilder,
     required this.messagesBuilder,
+    required this.onExpandDiscover,
+    required this.onExpandMessages,
     required this.onDragStart,
     required this.onSnap,
     required this.onHomeTap,
@@ -387,6 +484,10 @@ class _CardDeck extends StatefulWidget {
 
   /// True while an active Meet session makes the settled Home immersive (dark).
   final bool immersive;
+
+  /// The Home card's own title — the deck needs it to place the neighbour
+  /// titles that flank it.
+  final String homeTitle;
   final Widget home;
 
   /// Side pages are rebuilt each position tick with their current expansion
@@ -394,6 +495,10 @@ class _CardDeck extends StatefulWidget {
   /// widget instances so subtree state is never remounted.
   final Widget Function(double expand) discoverBuilder;
   final Widget Function(double expand) messagesBuilder;
+
+  /// Tap on a page's arrived title — takes that page full-screen.
+  final VoidCallback onExpandDiscover;
+  final VoidCallback onExpandMessages;
   final VoidCallback onDragStart;
   final ValueChanged<int> onSnap;
 
@@ -415,11 +520,6 @@ class _CardDeckState extends State<_CardDeck> {
   /// Home card travel into its peek slot, as a fraction of width — parks the
   /// card's left edge at ~75% of the screen width (demo f0023).
   static const double _peekShift = 0.615;
-
-  /// Side pages barely travel — they sit at their parked position with this
-  /// small parallax offset while the Home card does the full drag distance
-  /// (demo: the incoming page is revealed, not slid in).
-  static const double _sideParallax = 0.10;
 
   /// Side pages start this much ghosted and solidify as they are revealed
   /// (demo f0058: the incoming Messages list reads ~half strength mid-drag).
@@ -521,7 +621,7 @@ class _CardDeckState extends State<_CardDeck> {
                       top: 0,
                       bottom: 0,
                       width: w,
-                      left: -w * _sideParallax * (p - 1).clamp(0.0, 1.0),
+                      left: -w * _kSideParallax * (p - 1).clamp(0.0, 1.0),
                       child: Opacity(
                         opacity: 1.0 - _sideFade * (p - 1).clamp(0.0, 1.0),
                         child: _frame(
@@ -536,7 +636,7 @@ class _CardDeckState extends State<_CardDeck> {
                       top: 0,
                       bottom: 0,
                       width: w,
-                      left: w * _sideParallax * (3 - p).clamp(0.0, 1.0),
+                      left: w * _kSideParallax * (3 - p).clamp(0.0, 1.0),
                       child: Opacity(
                         opacity: 1.0 - _sideFade * (3 - p).clamp(0.0, 1.0),
                         child: _frame(
@@ -609,6 +709,36 @@ class _CardDeckState extends State<_CardDeck> {
                       ),
                     ),
                   ),
+                  // The side pages' titles ride ABOVE the deck so each is a
+                  // single widget for its whole life — ghost in the Home
+                  // strip, then travelling into its page — instead of one
+                  // copy on the card being swapped for another on the page.
+                  _DeckTitle(
+                    key: const ValueKey('deck-title-discover'),
+                    title: 'Discover',
+                    homeTitle: widget.homeTitle,
+                    chevron: _SideChevron.right,
+                    reveal: (2 - p).clamp(0.0, 1.0),
+                    expand: (1 - p).clamp(0.0, 1.0),
+                    peekInsetFrac: _kDiscoverPeekInset,
+                    deck: c.biggest,
+                    homeShift: Offset(tx, ty),
+                    homeScale: scale,
+                    onExpand: widget.onExpandDiscover,
+                  ),
+                  _DeckTitle(
+                    key: const ValueKey('deck-title-messages'),
+                    title: 'Messages',
+                    homeTitle: widget.homeTitle,
+                    chevron: _SideChevron.left,
+                    reveal: (p - 2).clamp(0.0, 1.0),
+                    expand: (p - 3).clamp(0.0, 1.0),
+                    peekInsetFrac: _kMessagesPeekInset,
+                    deck: c.biggest,
+                    homeShift: Offset(tx, ty),
+                    homeScale: scale,
+                    onExpand: widget.onExpandMessages,
+                  ),
                 ],
               );
             },
@@ -637,12 +767,11 @@ class _CardDeckState extends State<_CardDeck> {
 
 // ─── Home card ────────────────────────────────────────────────────────────────
 
-/// The Home hub card: the shared header + peeking neighbour-title preview
-/// sitting on the white (or, mid-session, black) card top, over the Home/Meet
-/// gradient body.
+/// The Home hub card: the shared header + its own big title sitting on the
+/// white (or, mid-session, black) card top, over the Home/Meet gradient body.
+/// The neighbour titles that flank it belong to the deck ([_DeckTitle]).
 class _HomeCard extends StatelessWidget {
   const _HomeCard({
-    required this.position,
     required this.immersive,
     required this.active,
     required this.sessionState,
@@ -658,7 +787,6 @@ class _HomeCard extends StatelessWidget {
     required this.onOpenSheet,
   });
 
-  final ValueListenable<double> position;
   final bool immersive;
   final bool active;
   final SessionState sessionState;
@@ -694,27 +822,27 @@ class _HomeCard extends StatelessWidget {
             ),
           ),
           _PageTitleStrip(
-            position: position,
-            titles: ['Discover', active ? 'Meet' : 'Home', 'Messages'],
+            title: active ? 'Meet' : 'Home',
             immersive: immersive,
           ),
           Expanded(
             child: Stack(
               children: [
-                // Stacked-deck depth cue (demo): a light card peeking above
-                // the gradient card, inset from both sides.
+                // Stacked-deck depth cue: a light card peeking above the
+                // gradient card, inset from both sides. Figma "Rectangle
+                // 3593" — 345 wide at left 24, radius 36, #E8EAF2.
                 Positioned(
                   top: 0,
-                  left: 26,
-                  right: 26,
+                  left: 24,
+                  right: 24,
                   bottom: 0,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: immersive
                           ? const Color(0xFF2A2A2A)
-                          : const Color(0xFFECECEC),
+                          : const Color(0xFFE8EAF2),
                       borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(24),
+                        top: Radius.circular(36),
                       ),
                     ),
                   ),
@@ -747,30 +875,27 @@ class _HomeCard extends StatelessWidget {
 enum _SideChevron { left, right }
 
 /// A side page card. Parked beside the Home peek (`expand` 0) it cedes the
-/// peek side of the screen to the stack — big title and body inset away from
-/// it. Expanded (`expand` 1) it is a true full-screen page whose big title has
-/// morphed into a compact `‹ Title` row (as in the demo's full Messages view).
+/// peek side of the screen to the stack — body inset away from it. Expanded
+/// (`expand` 1) it is a true full-screen page.
+///
+/// Its big title is NOT here: it lives in [_DeckTitle], above the whole deck,
+/// so the same widget can travel from the Home strip into this page's title
+/// slot. The header still reserves the room the title lands in.
 class _SideCard extends StatelessWidget {
   const _SideCard({
-    required this.title,
     required this.chevron,
     required this.expand,
     required this.onBack,
-    required this.onExpand,
     required this.child,
-    this.peekInsetFrac = 0.36,
+    this.peekInsetFrac = _kMessagesPeekInset,
     this.trailing,
   });
 
-  final String title;
   final _SideChevron chevron;
 
   /// 0 = parked layout · 1 = full-screen layout (continuous mid-animation).
   final double expand;
   final VoidCallback onBack;
-
-  /// Tap on the big title — expands this page to full-screen.
-  final VoidCallback onExpand;
   final Widget child;
 
   /// Fraction of the width the parked layout cedes to the Home peek stack
@@ -793,12 +918,9 @@ class _SideCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _SideHeader(
-                title: title,
                 chevron: chevron,
                 expand: expand,
-                inset: inset,
                 onBack: onBack,
-                onExpand: onExpand,
                 trailing: trailing,
               ),
               Expanded(
@@ -818,44 +940,29 @@ class _SideCard extends StatelessWidget {
   }
 }
 
+/// The side page's chrome — chevrons and the optional title-row action. The
+/// title itself is [_DeckTitle]; this header only reserves the height it lands
+/// in (parked: a tall band with the 43pt title low in it — Figma cap top ~231;
+/// full: the compact `‹ Title` app-bar row).
 class _SideHeader extends StatelessWidget {
   const _SideHeader({
-    required this.title,
     required this.chevron,
     required this.expand,
-    required this.inset,
     required this.onBack,
-    required this.onExpand,
     this.trailing,
   });
 
-  final String title;
   final _SideChevron chevron;
   final double expand;
-
-  /// Horizontal room ceded to the Home peek stack (0 when expanded).
-  final double inset;
   final VoidCallback onBack;
-  final VoidCallback onExpand;
   final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     final e = expand;
+    // Discover's parked chevron sits right and hands over to a left one as the
+    // page fills the screen; Messages always has the left one.
     final left = chevron == _SideChevron.left;
-
-    // Parked: the big 43pt SemiBold title sits LOW on the page (Figma: cap
-    // top ~231, i.e. ~165pt below the chevron row). Expanded: it morphs into
-    // the design's compact `‹ Title` app-bar row — 20pt beside a LEFT back
-    // chevron (Discover's parked chevron sits right and hands over to a
-    // left one as the page fills the screen).
-    // Figma full view: 18pt SemiBold title at cap-top 70 ABSOLUTE — the
-    // SafeArea already supplies ~59, so only ~8 remains inside the header.
-    final titleSize = lerpDouble(43, 18, e)!;
-    final titleTop = lerpDouble(164, 8, e)!;
-    final titleLeft = left
-        ? lerpDouble(inset + 20, 56, e)!
-        : lerpDouble(20, 56, e)!;
 
     return SizedBox(
       height: lerpDouble(228, 50, e)!,
@@ -914,27 +1021,143 @@ class _SideHeader extends StatelessWidget {
                 child: IgnorePointer(ignoring: e < 0.5, child: trailing),
               ),
             ),
-          Positioned(
-            top: titleTop,
-            left: titleLeft,
-            child: GestureDetector(
-              onTap: e < 0.5 ? onExpand : null,
-              child: Text(
-                title,
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.visible,
-                // Figma: Instrument Sans SemiBold, letter spacing 0.
-                style: TextStyle(
-                  fontSize: titleSize,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0,
-                  color: Colors.black,
-                ),
-              ),
-            ),
-          ),
         ],
+      ),
+    );
+  }
+}
+
+/// A side page's big title — hoisted out of BOTH the Home card's title strip
+/// and the page itself so that it is one widget the whole way, absolutely
+/// positioned over the deck and moved as you swipe.
+///
+/// It starts as the grey ghost flanking "Home" in the strip, and travels into
+/// its page's own title slot as the page is revealed, darkening from grey and
+/// growing to 43pt late in the trip (demo f0002→f0014). While its page is away
+/// it keeps the Home card's grip and rides off-screen with it — which is what
+/// the far ghost does in the demo (f0004: "Mes…" leaves with the card).
+class _DeckTitle extends StatelessWidget {
+  const _DeckTitle({
+    super.key,
+    required this.title,
+    required this.homeTitle,
+    required this.chevron,
+    required this.reveal,
+    required this.expand,
+    required this.peekInsetFrac,
+    required this.deck,
+    required this.homeShift,
+    required this.homeScale,
+    required this.onExpand,
+  });
+
+  final String title;
+
+  /// The centre title this one flanks — its width decides the ghost slot.
+  final String homeTitle;
+
+  /// Which side of the deck this page lives on — Discover's ghost flanks
+  /// "Home" on the left, Messages' on the right.
+  final _SideChevron chevron;
+
+  /// 0 = still the ghost in the Home strip · 1 = arrived in the page's slot.
+  final double reveal;
+
+  /// 0 = parked page layout · 1 = full-screen `‹ Title` app-bar row.
+  final double expand;
+
+  /// Width fraction the parked page cedes to the Home peek stack.
+  final double peekInsetFrac;
+
+  /// Deck size — every slot below is in deck (screen) coordinates.
+  final Size deck;
+
+  /// The Home card's current transform, so a ghost still owned by that card
+  /// tracks it exactly.
+  final Offset homeShift;
+  final double homeScale;
+  final VoidCallback onExpand;
+
+  @override
+  Widget build(BuildContext context) {
+    final left = chevron == _SideChevron.left; // Messages
+    final t = reveal.clamp(0.0, 1.0);
+    final e = expand.clamp(0.0, 1.0);
+
+    // Ghost and page titles are the same 42.92 face — only the ink changes on
+    // the way in, and it lands late in the trip (demo f0010→f0014). The size
+    // step happens later still, when the page goes full-screen.
+    final ink = Curves.easeIn.transform(((t - 0.45) / 0.5).clamp(0.0, 1.0));
+    final style = _titleStyle(
+      size: lerpDouble(_kTitleSize, _kFullTitleSize, e)!,
+      color: Color.lerp(
+        Color.lerp(_kGhostTitleColor, Colors.black, ink)!,
+        Colors.black,
+        e,
+      )!,
+    );
+    // Both slots anchor the text box, so it has to be measured at the size it
+    // currently is — and the ghost slot also needs the centre title's width,
+    // because Figma lays the three out as one row with a fixed gap.
+    final metrics = _titleMetrics(
+      context,
+      title,
+      style,
+      lerpDouble(_kPageTitleCapTop, _kFullTitleCapTop, e)!,
+    );
+    final ghostMetrics = _titleMetrics(context, title, style, _kTitleCapTop);
+    final homeWidth = _titleMetrics(
+      context,
+      homeTitle,
+      style,
+      _kTitleCapTop,
+    ).size.width;
+
+    // Ghost slot: flanking "Home" in the strip, on a settled Home card.
+    final homeLeft = (deck.width - homeWidth) / 2;
+    final ghost = Offset(
+      left
+          ? homeLeft + homeWidth + _kTitleGap
+          : homeLeft - _kTitleGap - ghostMetrics.size.width,
+      ghostMetrics.top,
+    );
+    // While the page is away the ghost belongs to the Home card and rides it;
+    // that grip lets go quickly once the page starts coming in, so the title
+    // stays put as the card slides on (demo f0002→f0004).
+    final grip = (1.0 - t) * (1.0 - t) * (1.0 - t);
+    final centre = deck.center(Offset.zero);
+    final held = Offset.lerp(
+      ghost,
+      centre + (ghost - centre) * homeScale + homeShift,
+      grip,
+    )!;
+
+    // Page slot: low on the parked page, then the compact app-bar row.
+    final inset = deck.width * peekInsetFrac * (1.0 - e);
+    final slot = Offset(
+      lerpDouble(
+        left ? inset + _kPageTitleLeft : _kPageTitleLeft,
+        _kFullTitleLeft,
+        e,
+      )!,
+      metrics.top,
+    );
+
+    final at = Offset.lerp(held, slot, t)!;
+    return Positioned(
+      left: at.dx,
+      top: at.dy,
+      child: GestureDetector(
+        // Tap the arrived title to take the page full-screen; while it is
+        // still a ghost on the Home card the deck owns the gesture.
+        onTap: t > 0.5 && e < 0.5 ? onExpand : null,
+        child: Text(
+          title,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.visible,
+          style: style,
+        ),
       ),
     );
   }
@@ -965,33 +1188,38 @@ class _SharedHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 2),
-      child: Row(
+      // Stack, not Row+Expanded: the trailing cluster (switch + gap + arrow) is
+      // wider than the leading arrow, so centring the wordmark in the leftover
+      // space parked it left of the card's true centre, as the demo doesn't.
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          _ArrowButton(
-            icon: Icons.arrow_back_ios_new_rounded,
-            enabled: true,
-            onTap: onPrev,
-          ),
-          const Expanded(
-            child: Center(
-              child: MetafterLogo(
-                form: MetafterLogoForm.wordmark,
-                variant: MetafterLogoVariant.red,
-                height: 18,
+          Row(
+            children: [
+              _ArrowButton(
+                icon: Icons.arrow_back_ios_new_rounded,
+                enabled: true,
+                onTap: onPrev,
               ),
-            ),
+              const Spacer(),
+              _IncognitoSwitch(
+                value: incognito,
+                immersive: immersive,
+                enabled: !sessionActive,
+                onChanged: onIncognito,
+              ),
+              const SizedBox(width: 4),
+              _ArrowButton(
+                icon: Icons.arrow_forward_ios_rounded,
+                enabled: true,
+                onTap: onNext,
+              ),
+            ],
           ),
-          _IncognitoSwitch(
-            value: incognito,
-            immersive: immersive,
-            enabled: !sessionActive,
-            onChanged: onIncognito,
-          ),
-          const SizedBox(width: 4),
-          _ArrowButton(
-            icon: Icons.arrow_forward_ios_rounded,
-            enabled: true,
-            onTap: onNext,
+          const MetafterLogo(
+            form: MetafterLogoForm.wordmark,
+            variant: MetafterLogoVariant.red,
+            height: 18,
           ),
         ],
       ),
@@ -1023,83 +1251,39 @@ class _ArrowButton extends StatelessWidget {
   }
 }
 
-/// Big animated "Discover · Home/Meet · Messages" indicator that peeks the
-/// neighbouring tab titles and tracks the carousel position.
+/// The Home card's own big title. The neighbouring "…over" / "Mes…" ghosts
+/// that flank it are NOT here — they are [_DeckTitle]s belonging to the side
+/// pages, which travel out of this band as their page is revealed. This one
+/// simply rides the card into its peek.
 class _PageTitleStrip extends StatelessWidget {
-  const _PageTitleStrip({
-    required this.position,
-    required this.titles,
-    required this.immersive,
-  });
+  const _PageTitleStrip({required this.title, required this.immersive});
 
-  final ValueListenable<double> position;
-  final List<String> titles;
+  final String title;
   final bool immersive;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 58,
-      child: ValueListenableBuilder<double>(
-        valueListenable: position,
-        builder: (context, raw, _) {
-          // The deck axis is 0..4; the strip's three titles live on the
-          // 1..3 span (Discover · Home · Messages) — shift into title space.
-          // The strip belongs to the HOME card: as the deck parks, the strip
-          // eases back to Home-centred so the peek always reads "Home"
-          // (demo f0023/f0070 — the parked sliver shows Home's edge glyphs,
-          // never the side page's title, which lives on the side page).
-          final deckT = (raw - 2.0).abs().clamp(0.0, 1.0);
-          final page = lerpDouble((raw - 1.0).clamp(0.0, 2.0), 1.0, deckT)!;
-          return LayoutBuilder(
-            builder: (context, c) {
-              // Neighbour titles sit mostly off-screen — only a clipped
-              // fragment shows at each edge (demo f0001: "…over" / "Mes…").
-              final spacing = c.maxWidth * 0.54;
-              return ClipRect(
-                child: Stack(
-                  children: [
-                    for (var i = 0; i < titles.length; i++)
-                      _buildTitle(i, page, deckT, spacing),
-                  ],
-                ),
-              );
-            },
-          );
-        },
-      ),
+    final style = _titleStyle(
+      size: _kTitleSize,
+      color: immersive ? Colors.white : Colors.black,
     );
-  }
-
-  Widget _buildTitle(int i, double page, double deckT, double spacing) {
-    final dist = (i - page).abs().clamp(0.0, 1.0);
-    // Active title contrasts with the surface; neighbours are the same
-    // large cut-off ghosts as the demo — solid grey, near-full size.
-    final active = immersive ? Colors.white : Colors.black;
-    // The neighbour ghosts belong to the SETTLED Home state. Mid-drag the
-    // incoming page's own header is the visible title (demo f0058 shows no
-    // strip preview on the card), so the ghosts fade out early in the drag;
-    // only the Home title rides the card into its peek.
-    final ghost = (1.0 - 2.5 * deckT).clamp(0.0, 1.0);
-    final opacity = i == 1 ? 1.0 : ghost;
-    return Positioned.fill(
-      child: Transform.translate(
-        offset: Offset((i - page) * spacing, 0),
-        child: Center(
-          child: Opacity(
-            opacity: opacity,
-            child: Text(
-              titles[i],
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.visible,
-              style: TextStyle(
-                fontSize: 42.0 - 4.0 * dist,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0,
-                color: Color.lerp(active, const Color(0xFFB4B8BB), dist),
-              ),
-            ),
+    // Figma anchors the title by cap top (146 absolute); the strip runs on to
+    // the content top (216) so the design's 39pt of air below it is real
+    // layout, not slack in a centred box.
+    final metrics = _titleMetrics(context, title, style, _kTitleCapTop);
+    return SizedBox(
+      height: _kTitleStripHeight,
+      width: double.infinity,
+      child: Padding(
+        padding: EdgeInsets.only(top: metrics.top - _kSharedHeaderHeight),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Text(
+            title,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.visible,
+            style: style,
           ),
         ),
       ),
@@ -2413,8 +2597,11 @@ class _IncognitoSwitch extends StatelessWidget {
           },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            width: 58,
-            height: 30,
+            // Track proportions taken from the demo header: a squatter pill
+            // (~1.7:1) than Material's default switch, so the knob nearly
+            // fills the height and the travel is short.
+            width: 48,
+            height: 28,
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
               color: trackColor,
@@ -2423,15 +2610,15 @@ class _IncognitoSwitch extends StatelessWidget {
             child: Align(
               alignment: value ? Alignment.centerLeft : Alignment.centerRight,
               child: Container(
-                width: 26,
-                height: 26,
+                width: 24,
+                height: 24,
                 decoration: const BoxDecoration(
                   shape: BoxShape.circle,
                   color: Colors.white,
                 ),
                 child: const Center(
                   child: CustomPaint(
-                    size: Size(18, 18),
+                    size: Size(16, 16),
                     painter: _IncognitoHatPainter(),
                   ),
                 ),

@@ -877,8 +877,12 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40),
+      // A FIXED measure, not a share of the width: this page is laid out over
+      // a changing width while the deck slides (the body cedes room to the
+      // Home peek), and a proportional box would re-wrap this copy on every
+      // frame of the transition — words visibly hopping between lines.
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 220),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

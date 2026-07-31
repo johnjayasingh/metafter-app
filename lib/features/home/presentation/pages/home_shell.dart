@@ -397,8 +397,10 @@ const Color _kGhostTitleColor = Color(0xFFBEC0C2);
 const double _kTitleGap = 56;
 
 /// Parked page title: same 42.92 face, low on the page (Figma cap top 231).
+/// Its left edge is the page's own content margin — the big title and the
+/// section header below it read as one column, so they share the 16.
 const double _kPageTitleCapTop = 231 - _kSafeTop;
-const double _kPageTitleLeft = 20;
+const double _kPageTitleLeft = 16;
 
 /// Full-screen page title: the compact `‹ Title` app-bar row — 18pt beside the
 /// back chevron, cap top 70 absolute.
@@ -2195,9 +2197,14 @@ class _ChevronDown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const CustomPaint(
-      size: Size(_width, _width * 0.5),
-      painter: _ChevronDownPainter(Colors.white),
+    return const Padding(
+      // The value and the chevron are two elements in the design, not one
+      // glyph — they need air between them.
+      padding: EdgeInsets.only(left: 8),
+      child: CustomPaint(
+        size: Size(_width, _width * 0.5),
+        painter: _ChevronDownPainter(Colors.white),
+      ),
     );
   }
 }

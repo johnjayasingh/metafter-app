@@ -4,6 +4,7 @@ import '../../../../core/domain/models.dart';
 import '../../../../core/services/app_services.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/peer_avatar.dart';
+import 'chat_screen.dart';
 import 'find_person_screen.dart';
 
 /// Full profile screen for an existing connection: bio, the invite note that
@@ -199,6 +200,44 @@ class _ConnectedProfileScreenState extends State<ConnectedProfileScreen> {
                 ],
 
                 const Spacer(),
+
+                // ── Message ──
+                // The one guaranteed entry into a conversation with this
+                // connection: ChatScreen is otherwise only reachable from a
+                // thread row, and no thread exists until a first message.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.brandRed,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                ChatScreen(peerSub: widget.card.sub),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.chat_bubble_outline_rounded,
+                          color: Colors.white, size: 20),
+                      label: const Text(
+                        'Message',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
 
                 // ── Find Person (only while in BLE range) ──
                 if (isNearby)

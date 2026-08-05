@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/domain/models.dart';
+import '../../../../core/services/app_services.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/peer_avatar.dart';
 import '../widgets/invite_note_dialog.dart';
+import 'chat_screen.dart';
 
 /// Nearby Person Profile — "Bubble Tap" (DESIGN_SPEC §5).
 ///
@@ -42,6 +44,36 @@ class _NearbyPersonProfileScreenState extends State<NearbyPersonProfileScreen> {
   bool _sent = false;
   bool _sending = false;
 
+  /// Already connected to this peer — the CTA flips from Connect to Message.
+  /// Without this there was no way to START a chat: ChatScreen was only
+  /// reachable from an existing thread, and a thread only exists once a
+  /// message has been sent.
+  bool _connected = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkConnected();
+  }
+
+  Future<void> _checkConnected() async {
+    if (widget.selfPreview) return;
+    try {
+      final conn = await AppServices.I.connections.byPeer(widget.card.sub);
+      if (mounted && conn != null) setState(() => _connected = true);
+    } catch (_) {
+      // Services not ready (tests) — keep the Connect CTA.
+    }
+  }
+
+  void _openChat() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChatScreen(peerSub: widget.card.sub),
+      ),
+    );
+  }
+
   Future<void> _connect() async {
     if (_sent || _sending) return;
     setState(() => _sending = true);
@@ -63,6 +95,10 @@ class _NearbyPersonProfileScreenState extends State<NearbyPersonProfileScreen> {
     final meters = widget.meters;
 
     return Scaffold(
+      // The invite-note dialog raises the keyboard; this full-bleed page has
+      // no inputs of its own, so don't let the inset squeeze the Column (it
+      // overflowed the Spacer by ~9px behind the dialog).
+      resizeToAvoidBottomInset: false,
       body: Container(
         decoration: const BoxDecoration(gradient: AppColors.brandSunset),
         child: SafeArea(
@@ -171,7 +207,7 @@ class _NearbyPersonProfileScreenState extends State<NearbyPersonProfileScreen> {
 
               const Spacer(),
 
-              // ── Connect / Request Sent ──
+              // ── Message / Connect / Request Sent ──
               // Absent in self-preview: the point of that screen is to show
               // what peers see, and you are not a peer of yourself.
               if (!widget.selfPreview)
@@ -189,13 +225,17 @@ class _NearbyPersonProfileScreenState extends State<NearbyPersonProfileScreen> {
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                      onPressed: _sent || _sending ? null : _connect,
+                      onPressed: _connected
+                          ? _openChat
+                          : (_sent || _sending ? null : _connect),
                       child: Text(
-                        _sent ? 'Request Sent' : 'Connect',
+                        _connected
+                            ? 'Message'
+                            : (_sent ? 'Request Sent' : 'Connect'),
                         style: TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w600,
-                          color: _sent
+                          color: _sent && !_connected
                               ? Colors.white.withValues(alpha: 0.7)
                               : Colors.white,
                         ),

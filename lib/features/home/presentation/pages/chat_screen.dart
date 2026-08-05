@@ -628,7 +628,14 @@ class _ChatScreenState extends State<ChatScreen> {
           // ── Input bar ──
           Container(
             color: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            // Last thing in the column, so it owns the system-bar inset —
+            // without it the composer sits under Android's navigation bar.
+            padding: EdgeInsets.fromLTRB(
+              16,
+              10,
+              16,
+              10 + MediaQuery.paddingOf(context).bottom,
+            ),
             child: Row(
               children: [
                 const Icon(Icons.sentiment_satisfied_alt_outlined,

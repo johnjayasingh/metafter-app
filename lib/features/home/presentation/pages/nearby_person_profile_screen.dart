@@ -17,6 +17,7 @@ class NearbyPersonProfileScreen extends StatefulWidget {
     required this.card,
     this.encounterId,
     this.meters,
+    this.selfPreview = false,
   });
 
   final ProfileCard card;
@@ -26,6 +27,11 @@ class NearbyPersonProfileScreen extends StatefulWidget {
 
   /// Last estimated distance — shows the "x.x mtr away" chip when known.
   final double? meters;
+
+  /// True when this is the user looking at their OWN card as peers see it.
+  /// Same layout, but the peer actions make no sense on yourself — you cannot
+  /// send yourself a connect request.
+  final bool selfPreview;
 
   @override
   State<NearbyPersonProfileScreen> createState() =>
@@ -166,34 +172,54 @@ class _NearbyPersonProfileScreenState extends State<NearbyPersonProfileScreen> {
               const Spacer(),
 
               // ── Connect / Request Sent ──
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFF03D33),
-                      disabledBackgroundColor:
-                          Colors.white.withValues(alpha: 0.16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+              // Absent in self-preview: the point of that screen is to show
+              // what peers see, and you are not a peer of yourself.
+              if (!widget.selfPreview)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFF03D33),
+                        disabledBackgroundColor:
+                            Colors.white.withValues(alpha: 0.16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
-                    ),
-                    onPressed: _sent || _sending ? null : _connect,
-                    child: Text(
-                      _sent ? 'Request Sent' : 'Connect',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                        color: _sent
-                            ? Colors.white.withValues(alpha: 0.7)
-                            : Colors.white,
+                      onPressed: _sent || _sending ? null : _connect,
+                      child: Text(
+                        _sent ? 'Request Sent' : 'Connect',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: _sent
+                              ? Colors.white.withValues(alpha: 0.7)
+                              : Colors.white,
+                        ),
                       ),
                     ),
                   ),
+                )
+              else
+                Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    24,
+                    0,
+                    24,
+                    32 + MediaQuery.paddingOf(context).bottom,
+                  ),
+                  child: Text(
+                    'This is how your card looks to people nearby.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.white.withValues(alpha: 0.7),
+                    ),
+                  ),
                 ),
-              ),
             ],
           ),
         ),

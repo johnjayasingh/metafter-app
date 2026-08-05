@@ -45,7 +45,8 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
         SnackBar(
           content: Text(
             e.isUnavailable
-                ? 'Face scan isn’t available here — you can skip and verify later.'
+                ? 'Face scan isn’t available on this device. Try again on a '
+                      'device with a working front camera.'
                 : 'Face scan didn’t complete: ${e.message}',
           ),
         ),
@@ -59,14 +60,6 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
     }
   }
 
-  void _skip() {
-    _draft.update(() {
-      _draft.livenessSessionId = null;
-      _draft.verificationPhotoKey = null;
-    });
-    context.push(AppRouter.signupVerifying);
-  }
-
   @override
   Widget build(BuildContext context) {
     return SignupScaffold(
@@ -76,24 +69,11 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
         'We’ll run a quick face scan and match it with your profile photo to '
         'confirm your identity.',
       ),
-      bottomButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          MetafterPrimaryButton(
-            label: _running ? 'Starting…' : 'Start face scan',
-            onPressed: _running ? null : _startScan,
-          ),
-          TextButton(
-            onPressed: _running ? null : _skip,
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.textSecondary,
-            ),
-            child: const Text(
-              'Skip for now',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
+      // The face scan is mandatory — there is no "skip for now" path, so the
+      // verifying screen always has a liveness session to resolve.
+      bottomButton: MetafterPrimaryButton(
+        label: _running ? 'Starting…' : 'Start face scan',
+        onPressed: _running ? null : _startScan,
       ),
       child: Column(
         children: [
@@ -122,13 +102,53 @@ class _SignupSelfieScreenState extends State<SignupSelfieScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          const Text(
-            'Hold your face inside the circle and follow the on-screen prompts.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              color: AppColors.textSecondary,
-              height: 1.4,
+          // This is the ONLY briefing the user gets: the SDK's own start view
+          // is disabled so the scan opens straight into the camera rather than
+          // into a second, off-brand intro.
+          const _ScanHint(
+            icon: Icons.light_mode_outlined,
+            text: 'Find a well-lit spot and take off hats or sunglasses.',
+          ),
+          const SizedBox(height: 12),
+          const _ScanHint(
+            icon: Icons.center_focus_weak_rounded,
+            text: 'Hold your face inside the oval until it fills the frame.',
+          ),
+          const SizedBox(height: 12),
+          const _ScanHint(
+            icon: Icons.timer_outlined,
+            text: 'Stay still — the check takes a couple of seconds.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One line of pre-scan guidance — icon plus copy, in the app's own styling.
+class _ScanHint extends StatelessWidget {
+  const _ScanHint({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: AppColors.brandRed),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+                height: 1.4,
+              ),
             ),
           ),
         ],

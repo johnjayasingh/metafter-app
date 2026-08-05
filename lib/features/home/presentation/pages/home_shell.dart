@@ -1829,10 +1829,16 @@ class _MeetRadarState extends State<_MeetRadar> with TickerProviderStateMixin {
   }
 
   /// Radial placement ∝ estimated distance; angle stable per peer.
+  ///
+  /// The base radius must clear the centre avatar: it is 107.68 wide and
+  /// painted on top of the bubbles, so the old 0.30 base parked a very close
+  /// peer (≈64-wide bubble, plus its distance chip) underneath it, invisible.
+  /// 0.70 keeps even a zero-distance bubble — chip included — orbiting outside
+  /// the avatar's edge at every angle.
   Alignment _alignmentFor(NearbyPeer p) {
     final angle = (p.displayKey.hashCode % 360) * math.pi / 180.0;
-    final frac = (p.meters / math.max(widget.maxMeters, 0.1)).clamp(0.12, 1.0);
-    final r = 0.30 + 0.55 * frac;
+    final frac = (p.meters / math.max(widget.maxMeters, 0.1)).clamp(0.0, 1.0);
+    final r = 0.70 + 0.26 * frac;
     return Alignment(math.cos(angle) * r, math.sin(angle) * r * 0.85);
   }
 
@@ -2097,46 +2103,65 @@ class _CenterAvatar extends StatelessWidget {
     return Stack(
       alignment: Alignment.bottomRight,
       children: [
-        Container(
-          width: diameter,
-          height: diameter,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: ringColor, width: 3),
-            color: Colors.white,
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x404F5174),
-                offset: Offset(0, 12.91),
-                blurRadius: 25.81,
-              ),
-            ],
-          ),
-          child: ClipOval(
-            child: photoPath != null
-                ? Image.file(
-                    File(photoPath!),
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => const _AvatarFallback(),
-                  )
-                : const _AvatarFallback(),
-          ),
-        ),
+        // The whole avatar opens settings, same as the gear: the 24pt disc
+        // alone was far below the 48pt minimum touch target and users read
+        // the avatar itself as "my profile → settings" anyway.
         GestureDetector(
           onTap: onGear,
-          // Figma: a 24 blue disc carrying an 18.86 × 20 gear at 1.5pt — the
-          // ring around it was the app's own addition and reads as bulk at
-          // this size.
           child: Container(
-            margin: const EdgeInsets.only(right: 2, bottom: 2),
-            width: 24,
-            height: 24,
-            decoration: const BoxDecoration(
-              color: AppColors.discoverActive,
+            width: diameter,
+            height: diameter,
+            decoration: BoxDecoration(
               shape: BoxShape.circle,
+              border: Border.all(color: ringColor, width: 3),
+              color: Colors.white,
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x404F5174),
+                  offset: Offset(0, 12.91),
+                  blurRadius: 25.81,
+                ),
+              ],
             ),
-            child: const Center(
-              child: Icon(Icons.settings, size: 19, color: Colors.white),
+            child: ClipOval(
+              child: photoPath != null
+                  ? Image.file(
+                      File(photoPath!),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const _AvatarFallback(),
+                    )
+                  : const _AvatarFallback(),
+            ),
+          ),
+        ),
+        // 44pt hit box around the visually-unchanged 24 disc (Figma: a 24 blue
+        // disc carrying an 18.86 × 20 gear at 1.5pt). Positioned so the disc
+        // centre stays exactly where the old margin put it.
+        Positioned(
+          right: -6,
+          bottom: -6,
+          child: GestureDetector(
+            onTap: onGear,
+            behavior: HitTestBehavior.opaque,
+            child: const SizedBox(
+              width: 44,
+              height: 44,
+              child: Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: AppColors.discoverActive,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child:
+                          Icon(Icons.settings, size: 19, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ),

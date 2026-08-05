@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart' as ble;
+import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'package:permission_handler/permission_handler.dart';
 
@@ -142,13 +142,39 @@ class BleProximityEngine implements ProximityEngine {
     _cardReadsInFlight = 0;
 
     final ready = await _ensureBluetoothReady();
-    if (!ready || !_running || gen != _generation) {
+    if (!ready) {
+      _running = false;
+      // Throw rather than return quietly: SessionService catches this and maps
+      // it to a visible message. Returning normally let it move to
+      // SessionActive and start the countdown with the radio never started —
+      // the UI said "You are discoverable" while nothing was advertising or
+      // scanning, which is what made this so hard to spot.
+      throw StateError('Bluetooth permission or adapter unavailable');
+    }
+    // Session was cancelled (or superseded) while we awaited — that is a
+    // normal race, not an error, so unwind silently.
+    if (!_running || gen != _generation) {
       _running = false;
       return;
     }
 
     if (!config.incognito) {
-      await _startPeripheral(gen);
+      // Bounded on purpose. _startPeripheral's own awaits are individually
+      // capped, but the vendor BLE stack can wedge *inside* a single call —
+      // observed on Android 16, where the GATT server registers and then
+      // addService/startAdvertising never returns. Unbounded, that leaves
+      // startSession() hung forever: the UI sits on "Starting…" and, worse,
+      // _startScanning() below is never reached, so the radio stays deaf even
+      // though this class already supports scan-only degradation. Cap it and
+      // fall through — advertising is best-effort, scanning is not.
+      await _startPeripheral(gen).timeout(
+        const Duration(seconds: 12),
+        onTimeout: () {
+          debugPrint('BLE: peripheral start timed out — continuing scan-only');
+          _peripheralAvailable = false;
+        },
+      );
+      if (!_running || gen != _generation) return;
     }
     await _startScanning(gen);
 
@@ -265,17 +291,32 @@ class BleProximityEngine implements ProximityEngine {
 
     if (Platform.isAndroid) {
       try {
+        // ONLY the BLE trio may gate the session. ACCESS_FINE_LOCATION is
+        // declared `maxSdkVersion="30"` in the manifest (BLUETOOTH_SCAN
+        // carries `neverForLocation`), so from API 31 on it is not part of the
+        // merged manifest at all — requesting it can only ever come back
+        // denied. Including it here meant `granted` was false on every modern
+        // Android device, so _startScanning() was never reached and discovery
+        // was dead while the UI still counted down "You are discoverable".
         final statuses = await [
           Permission.bluetoothScan,
           Permission.bluetoothConnect,
           Permission.bluetoothAdvertise,
-          Permission.locationWhenInUse,
         ].request();
         final granted =
             statuses.values.every((s) => s.isGranted || s.isLimited);
         if (!granted) return false;
       } catch (_) {
         return false;
+      }
+
+      // API ≤30 still needs location to see scan results (there the trio is
+      // auto-granted by permission_handler and this is the permission that
+      // actually matters). Best-effort: it must never gate a modern session.
+      try {
+        await Permission.locationWhenInUse.request();
+      } catch (_) {
+        // Irrelevant on API 31+, where the permission no longer exists.
       }
 
       try {
@@ -319,15 +360,17 @@ class BleProximityEngine implements ProximityEngine {
     try {
       final peripheral = _peripheral ??= ble.PeripheralManager();
 
-      // Android needs its own runtime authorization path for the plugin.
-      if (Platform.isAndroid) {
-        try {
-          await peripheral.authorize();
-        } catch (_) {}
-      }
-
-      // Wait for the peripheral stack to power on (unavailable on iOS
-      // simulators — we degrade to scan-only below).
+      // Wait for the peripheral stack to power on BEFORE authorizing.
+      //
+      // Order matters and used to be the other way round. A freshly built
+      // PeripheralManager reports `unknown` for a moment, and calling
+      // authorize() inside that window never returns on Android 16 (observed
+      // on both a vivo V2515 and a Samsung SM-M176B) — the future simply never
+      // completes, wedging the whole peripheral role. The device then scans
+      // happily while advertising nothing, so it is undiscoverable and two
+      // phones sitting next to each other never see one another.
+      //
+      // (unavailable on iOS simulators — we degrade to scan-only below.)
       if (peripheral.state != ble.BluetoothLowEnergyState.poweredOn) {
         try {
           await peripheral.stateChanged
@@ -341,6 +384,15 @@ class BleProximityEngine implements ProximityEngine {
           }
         }
       }
+
+      // Android needs its own runtime authorization path for the plugin. Still
+      // bounded as a backstop — _ensureBluetoothReady() has already secured
+      // BLUETOOTH_ADVERTISE/CONNECT, so continuing on timeout is safe.
+      if (Platform.isAndroid) {
+        try {
+          await peripheral.authorize().timeout(const Duration(seconds: 3));
+        } catch (_) {}
+      }
       if (!_running || gen != _generation) return;
 
       _subs.add(peripheral.characteristicReadRequested
@@ -348,16 +400,21 @@ class BleProximityEngine implements ProximityEngine {
       _subs.add(peripheral.characteristicWriteRequested
           .listen(_onCharacteristicWrite, onError: (Object _) {}));
 
+      debugPrint('BLE-periph: 3 powered on, removing services');
       await peripheral.removeAllServices();
+      debugPrint('BLE-periph: 4 services removed, adding service');
       _gattService = _buildGattService();
       await peripheral.addService(_gattService!);
+      debugPrint('BLE-periph: 5 service added, advertising');
       await _advertise(peripheral);
+      debugPrint('BLE-periph: 6 ADVERTISING OK');
       _peripheralAvailable = true;
 
       // Sweep stale half-assembled writes.
       _periodic(const Duration(seconds: 5), gen, _sweepWriteBuffers);
-    } catch (_) {
+    } catch (e) {
       // Peripheral role unavailable — keep the engine alive, scan-only.
+      debugPrint('BLE-periph: FAILED $e');
       _peripheralAvailable = false;
     }
   }
@@ -578,7 +635,10 @@ class BleProximityEngine implements ProximityEngine {
       if (peer.card == null &&
           !peer.cardReadInFlight &&
           peer.cardReadAttempts <= 1 && // initial try + one retry
-          peer.meters <= budget) {
+          peer.meters <= budget * _budgetExitFactor) {
+        // Pre-fetch out to the exit threshold so the card is already loaded by
+        // the time the peer is admitted — the bubble appears as a person, not
+        // a dashed ring.
         _enqueueCardRead(id, gen);
       }
     }
@@ -593,12 +653,21 @@ class BleProximityEngine implements ProximityEngine {
     if (_peers.length != before) _emitNearby();
   }
 
+  /// Hysteresis width of the distance budget: a peer is admitted at
+  /// `<= budget` and only evicted again beyond `budget × this`. RSSI is noisy
+  /// (±10 dB swings at a fixed half-meter are routine — a hand or torso in the
+  /// path doubles the log-distance estimate), so a hard cutoff at the budget
+  /// made peers standing still at 1–2 ft flicker in and out of the radar
+  /// whenever a dip pushed the estimate past the (tight, 2 m default) budget.
+  static const double _budgetExitFactor = 1.6;
+
   void _emitNearby() {
     if (_nearbyCtrl.isClosed) return;
     final budget = _config?.maxMeters ?? 10.0;
+    final exit = budget * _budgetExitFactor;
     final list = <NearbyPeer>[
       for (final p in _peers.values)
-        if (p.meters <= budget)
+        if (_gateInRange(p, budget, exit))
           NearbyPeer(
             eid: p.eid,
             meters: double.parse(p.meters.toStringAsFixed(2)),
@@ -609,6 +678,16 @@ class BleProximityEngine implements ProximityEngine {
           ),
     ]..sort((a, b) => a.meters.compareTo(b.meters));
     _nearbyCtrl.add(list);
+  }
+
+  /// Enter/exit gating for one peer (see [_budgetExitFactor]).
+  static bool _gateInRange(_BlePeer p, double budget, double exit) {
+    if (p.inRange) {
+      if (p.meters > exit) p.inRange = false;
+    } else {
+      if (p.meters <= budget) p.inRange = true;
+    }
+    return p.inRange;
   }
 
   void _enqueueCardRead(String eid, int gen) {
@@ -846,6 +925,11 @@ class _BlePeer {
   ProfileCard? card;
   bool cardReadInFlight = false;
   int cardReadAttempts = 0;
+
+  /// Distance-budget hysteresis state (see [_emitNearby]). Admitted when the
+  /// smoothed estimate first dips inside the budget; only evicted again once
+  /// it exceeds the wider exit threshold.
+  bool inRange = false;
 }
 
 /// Accumulates length-prefixed, chunked GATT writes (4-byte big-endian length

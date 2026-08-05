@@ -114,7 +114,12 @@ class _ConnectRequestsScreenState extends State<ConnectRequestsScreen> {
                   );
                 }
                 return ListView.separated(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  // Explicit padding replaces the automatic safe-area inset —
+                  // re-add it so the last request clears the navigation bar.
+                  padding: EdgeInsets.only(
+                    top: 8,
+                    bottom: 8 + MediaQuery.paddingOf(context).bottom,
+                  ),
                   itemCount: rows.length,
                   separatorBuilder: (_, _) => const Divider(
                     height: 1,

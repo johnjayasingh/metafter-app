@@ -98,7 +98,14 @@ class _PrivacySecurityScreenState extends State<PrivacySecurityScreen> {
         centerTitle: true,
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+        // Re-add the system-bar inset an explicit padding would otherwise
+        // replace, so the last row clears Android's navigation bar.
+        padding: EdgeInsets.fromLTRB(
+          20,
+          4,
+          20,
+          24 + MediaQuery.paddingOf(context).bottom,
+        ),
         children: [
           const Padding(
             padding: EdgeInsets.only(left: 4, bottom: 12),

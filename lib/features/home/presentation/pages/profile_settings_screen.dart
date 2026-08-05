@@ -1,11 +1,14 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/data/mock_data.dart';
+import '../../../../core/routes/app_router.dart';
 import '../../../../core/domain/models.dart';
 import '../../../../core/repositories/repositories.dart';
 import '../../../../core/services/app_services.dart';
+import '../../../../core/services/bootstrap_services.dart';
 import '../../../../core/theme/app_colors.dart';
 import 'nearby_person_profile_screen.dart';
 import 'pricing_screen.dart';
@@ -25,6 +28,10 @@ class ProfileSettingsScreen extends StatefulWidget {
 
 class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   SettingsRepository get _settings => AppServices.I.settings;
+
+  /// Guards the logout row while the wipe is in flight — it is not idempotent
+  /// from the user's point of view and the taps are cheap to repeat.
+  bool _loggingOut = false;
 
   static const _languageOptions = <String>[
     'English',
@@ -171,6 +178,62 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     );
   }
 
+  /// Re-runs the face scan for a profile that never came back verified (the
+  /// verdict resolves in the background, so a user can easily leave signup
+  /// before it lands).
+  void _verifyIdentity() {
+    context.push(AppRouter.signupSelfie);
+  }
+
+  /// Log out — which, on a local-first app, means erase.
+  ///
+  /// There is no cloud copy of the user's profile, chats or connections to
+  /// sign back into, so the confirmation spells out exactly what disappears
+  /// rather than using the usual "you'll need to sign in again" wording.
+  Future<void> _confirmLogout() async {
+    if (_loggingOut) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Log out and delete everything?'),
+        content: const Text(
+          'MetAfter keeps your data on this device only — there is no cloud '
+          'backup to restore from.\n\n'
+          'Logging out permanently deletes:\n'
+          '  •  Your profile and photo\n'
+          '  •  All connections and requests\n'
+          '  •  All messages and chat history\n'
+          '  •  Everyone you have crossed paths with\n'
+          '  •  Your encryption keys\n\n'
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF6B6B6B))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete & Log Out',
+                style: TextStyle(
+                    color: AppColors.brandRed, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _loggingOut = true);
+    await signOutAndWipe();
+    if (!mounted) return;
+    // go() (not push) so the wiped home/settings stack cannot be popped back
+    // into — those screens now reference data that no longer exists.
+    context.go(AppRouter.signupBasics);
+  }
+
   void _openPro() {
     showDialog<void>(
       context: context,
@@ -185,7 +248,8 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       final card = await AppServices.I.profile.buildCard();
       if (!mounted) return;
       Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => NearbyPersonProfileScreen(card: card),
+        builder: (_) =>
+            NearbyPersonProfileScreen(card: card, selfPreview: true),
       ));
     } catch (_) {
       if (!mounted) return;
@@ -216,7 +280,15 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
         centerTitle: true,
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        // An explicit padding REPLACES the ListView's automatic safe-area
+        // inset, so the system bar area has to be re-added by hand — without
+        // it the last rows sit under Android's navigation bar.
+        padding: EdgeInsets.fromLTRB(
+          20,
+          8,
+          20,
+          24 + MediaQuery.paddingOf(context).bottom,
+        ),
         children: [
           ValueListenableBuilder<MyProfile?>(
             valueListenable: AppServices.I.profile.profile,
@@ -256,6 +328,54 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
             ),
           ]),
           const SizedBox(height: 12),
+          // The face-scan verdict lands asynchronously — often after the user
+          // has already tapped through "Done" — so this is where they can
+          // actually see how it came out, and re-run it if it didn't pass.
+          _RowGroup(rows: [
+            ValueListenableBuilder<MyProfile?>(
+              valueListenable: AppServices.I.profile.profile,
+              builder: (_, profile, _) {
+                final verified = profile?.verified ?? false;
+                return _ChevronRow(
+                  label: 'Identity Verification',
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        verified
+                            ? Icons.verified_rounded
+                            : Icons.error_outline_rounded,
+                        size: 18,
+                        color: verified
+                            ? AppColors.discoverActive
+                            : const Color(0xFF8A8A8A),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        verified ? 'Verified' : 'Not verified',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: verified
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          color: verified
+                              ? AppColors.discoverActive
+                              : const Color(0xFF8A8A8A),
+                        ),
+                      ),
+                      if (!verified) ...[
+                        const SizedBox(width: 6),
+                        const Icon(Icons.chevron_right_rounded,
+                            color: Color(0xFFB0B0B0), size: 22),
+                      ],
+                    ],
+                  ),
+                  onTap: verified ? () {} : _verifyIdentity,
+                );
+              },
+            ),
+          ]),
+          const SizedBox(height: 12),
           _RowGroup(rows: [
             _ChevronRow(
               label: 'Share Profile',
@@ -270,8 +390,10 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
               valueListenable: MockData.demoContent,
               builder: (_, v, _) => SwitchListTile(
                 title: const Text('Demo Content'),
-                subtitle:
-                    const Text('Show sample people in Discover & Messages'),
+                subtitle: const Text(
+                  'Simulate nearby people and show sample rows in Discover & '
+                  'Messages. Off = real Bluetooth discovery and real data.',
+                ),
                 value: v,
                 activeTrackColor: AppColors.brandRed,
                 onChanged: (on) => MockData.demoContent.value = on,
@@ -358,7 +480,54 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           ]),
           const SizedBox(height: 18),
           _GetProButton(onTap: _openPro),
+          const SizedBox(height: 18),
+          _RowGroup(rows: [
+            _LogOutRow(busy: _loggingOut, onTap: _confirmLogout),
+          ]),
         ],
+      ),
+    );
+  }
+}
+
+/// Destructive sign-out row. Red label rather than the usual black, and it
+/// swaps to a spinner while [ProfileSettingsScreen] runs the wipe so the user
+/// gets feedback during the (brief) DB + keychain teardown.
+class _LogOutRow extends StatelessWidget {
+  const _LogOutRow({required this.busy, required this.onTap});
+
+  final bool busy;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: busy ? null : onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        child: Row(
+          children: [
+            const Expanded(
+              child: Text('Log Out',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.brandRed,
+                  )),
+            ),
+            if (busy)
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColors.brandRed),
+              )
+            else
+              const Icon(Icons.logout_rounded,
+                  color: AppColors.brandRed, size: 20),
+          ],
+        ),
       ),
     );
   }

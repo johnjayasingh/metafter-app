@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../features/signup/data/signup_draft.dart';
 import '../domain/models.dart';
@@ -30,8 +31,35 @@ class MockData {
   // Settings → "Demo Content". Never written to the database — the screens
   // merge these rows in front of the live streams while the toggle is on.
 
-  /// Session-scoped toggle for the sample rows below.
+  /// The single switch for EVERY piece of invented data in the app: the
+  /// sample rows below, the signup prefill, and the simulated proximity
+  /// engine. While it is off the app runs entirely on real data — real BLE
+  /// discovery, real threads, real contacts.
   static final ValueNotifier<bool> demoContent = ValueNotifier<bool>(false);
+
+  static const String _demoContentKey = 'demoContent';
+
+  /// Restores the switch and keeps it persisted from here on.
+  ///
+  /// Must run BEFORE `initAppServices()` — the flag decides whether proximity
+  /// is served by the simulated engine or by real BLE, and the engine is built
+  /// during bootstrap.
+  static Future<void> loadDemoContent() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      demoContent.value = prefs.getBool(_demoContentKey) ?? false;
+    } catch (e) {
+      debugPrint('Demo Content flag load failed: $e');
+    }
+    demoContent.addListener(() async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_demoContentKey, demoContent.value);
+      } catch (e) {
+        debugPrint('Demo Content flag save failed: $e');
+      }
+    });
+  }
 
   /// Prefix marking demo rows so taps/actions can be intercepted.
   static const String demoPrefix = 'demo-';
@@ -106,9 +134,15 @@ class MockData {
   }
 
   /// Populates [SignupDraft.instance] with sample data so the multi-step
-  /// signup flow is one-tap navigable. No-op outside debug builds, and
-  /// no-op if the user already has a persisted draft.
+  /// signup flow is one-tap navigable. No-op unless Demo Content is on, no-op
+  /// outside debug builds, and no-op if the user already has a persisted
+  /// draft.
+  ///
+  /// Gated on the switch because it is the one mock that ends up on a REAL
+  /// account: prefilling in every debug build is how a genuinely signed-up
+  /// user ends up named "Luna Ray".
   static void prefillSignupDraft({bool force = false}) {
+    if (!demoContent.value && !force) return;
     if (!kDebugMode && !force) return;
     final d = SignupDraft.instance;
     // Don't clobber a real persisted signup.

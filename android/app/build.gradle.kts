@@ -112,8 +112,12 @@ dependencies {
     // Amazon Rekognition Face Liveness UI (Jetpack Compose component).
     // Versions are a starting point — reconcile with your Kotlin/AGP/Compose setup.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    implementation("com.amplifyframework.ui:liveness:1.5.0")
-    implementation(platform("androidx.compose:compose-bom:2024.09.00"))
+    // 1.9.0+ ships 16 KB-aligned native libs; 1.5.0's
+    // libliveness_opengl_renderer_jni.so is 4 KB-aligned and trips Android
+    // 15+'s compatibility warning (and would block a Play release).
+    // The BOM is pinned to what this release resolves against.
+    implementation("com.amplifyframework.ui:liveness:1.11.0")
+    implementation(platform("androidx.compose:compose-bom:2026.03.00"))
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.compose.material3:material3")
 }

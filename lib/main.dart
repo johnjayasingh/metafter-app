@@ -45,17 +45,19 @@ Future<void> bootstrap({
   // in across launches).
   await SignupDraft.instance.load();
 
+  // Restore the "Demo Content" switch first: it decides whether proximity is
+  // simulated or real, and the engine is built during bootstrap below.
+  await MockData.loadDemoContent();
+
   // Build the local-first service graph (crypto keys, SQLite repositories,
   // proximity engine, relay transport) and install it as AppServices.I.
-  // Local/dev flavors run against the simulated proximity engine so the
-  // whole app is drivable on emulators/simulators without BLE hardware.
-  await initAppServices(
-    simulated: EnvironmentConfig.isLocal || EnvironmentConfig.isDev,
-  );
+  // Proximity follows the switch — simulated peers ONLY while Demo Content is
+  // on, real BLE otherwise, in every flavor.
+  await initAppServices(simulated: MockData.demoContent);
 
-  // Prefill the signup draft with mock data in debug builds so we can
-  // tab through the multi-step signup flow without retyping everything.
-  // Skipped if a real draft was already persisted.
+  // Prefill the signup draft with mock data so we can tab through the
+  // multi-step signup flow without retyping everything. Demo Content only —
+  // it must never land on a real account.
   MockData.prefillSignupDraft();
 
   SystemChrome.setSystemUIOverlayStyle(

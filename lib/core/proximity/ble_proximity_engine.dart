@@ -175,6 +175,22 @@ class BleProximityEngine implements ProximityEngine {
         },
       );
       if (!_running || gen != _generation) return;
+
+      // The very first bring-up in a process routinely wedges while the
+      // manager is still settling (both test devices reproduced it); the next
+      // attempt succeeds. Without this retry the device silently spends the
+      // whole session scan-only — it can see peers but no peer can see it,
+      // which presents to users as one-way discovery.
+      if (!_peripheralAvailable) {
+        unawaited(Future<void>.delayed(const Duration(seconds: 3), () async {
+          if (!_running || gen != _generation || _peripheralAvailable) return;
+          debugPrint('BLE: retrying peripheral start');
+          await _startPeripheral(gen).timeout(
+            const Duration(seconds: 12),
+            onTimeout: () => _peripheralAvailable = false,
+          );
+        }));
+      }
     }
     await _startScanning(gen);
 
@@ -400,21 +416,20 @@ class BleProximityEngine implements ProximityEngine {
       _subs.add(peripheral.characteristicWriteRequested
           .listen(_onCharacteristicWrite, onError: (Object _) {}));
 
-      debugPrint('BLE-periph: 3 powered on, removing services');
       await peripheral.removeAllServices();
-      debugPrint('BLE-periph: 4 services removed, adding service');
       _gattService = _buildGattService();
       await peripheral.addService(_gattService!);
-      debugPrint('BLE-periph: 5 service added, advertising');
       await _advertise(peripheral);
-      debugPrint('BLE-periph: 6 ADVERTISING OK');
+      debugPrint('BLE: advertising up');
       _peripheralAvailable = true;
 
       // Sweep stale half-assembled writes.
       _periodic(const Duration(seconds: 5), gen, _sweepWriteBuffers);
     } catch (e) {
       // Peripheral role unavailable — keep the engine alive, scan-only.
-      debugPrint('BLE-periph: FAILED $e');
+      // Never silent: an invisible-but-scanning device is the hardest field
+      // failure to diagnose (it looks like the OTHER device is broken).
+      debugPrint('BLE: peripheral start failed ($e) — scan-only');
       _peripheralAvailable = false;
     }
   }
@@ -542,9 +557,13 @@ class BleProximityEngine implements ProximityEngine {
         final json = buffer.takeComplete();
         if (json != null) {
           _writeBuffers.remove(key);
+          debugPrint('BLE-recv: complete write on $charUuid '
+              '(${json.keys.join(",")})');
           _dispatchInboundWrite(charUuid, json);
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('BLE-recv: write handling failed: $e');
+      }
     }());
   }
 
@@ -589,9 +608,10 @@ class BleProximityEngine implements ProximityEngine {
         continuousUpdates: true,
         androidScanMode: fbp.AndroidScanMode.lowLatency,
       );
-    } catch (_) {
+    } catch (e) {
       // Scan failure leaves the engine running; the peripheral side may
       // still make us discoverable to others.
+      debugPrint('BLE: scan start failed: $e');
     }
   }
 
@@ -848,8 +868,11 @@ class BleProximityEngine implements ProximityEngine {
             withoutResponse: false,
           );
         }
+        debugPrint('BLE-write: ${framed.length}B to $charUuid OK '
+            '(chunk=$chunkSize)');
         return true;
-      } catch (_) {
+      } catch (e) {
+        debugPrint('BLE-write: attempt $attempt to $charUuid failed: $e');
         // retry once
       } finally {
         try {

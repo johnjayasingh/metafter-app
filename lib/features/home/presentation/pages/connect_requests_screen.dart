@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../../core/domain/models.dart';
@@ -21,6 +23,15 @@ class ConnectRequestsScreen extends StatefulWidget {
 class _ConnectRequestsScreenState extends State<ConnectRequestsScreen> {
   late final Stream<List<ConnectionRequest>> _stream;
 
+  /// Deadline for the post-accept confirmation banner (see [_accept]).
+  Timer? _bannerTimer;
+
+  @override
+  void dispose() {
+    _bannerTimer?.cancel();
+    super.dispose();
+  }
+
   /// Request ids with an accept/decline in flight (buttons disabled).
   final Set<String> _busy = {};
 
@@ -40,7 +51,7 @@ class _ConnectRequestsScreenState extends State<ConnectRequestsScreen> {
 
     final nearby = request.peerSub.isNotEmpty &&
         AppServices.I.engine.isNearby(request.peerSub);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    final banner = ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('You are now connected with ${request.card.name}'),
       behavior: SnackBarBehavior.floating,
       action: nearby
@@ -53,6 +64,11 @@ class _ConnectRequestsScreenState extends State<ConnectRequestsScreen> {
             )
           : null,
     ));
+    // Accessibility services suspend SnackBar auto-dismiss (see the same
+    // pattern in home_shell's accept flow) — enforce the transient intent.
+    // Tracked so tests (and dispose) don't leak a pending timer.
+    _bannerTimer?.cancel();
+    _bannerTimer = Timer(const Duration(seconds: 8), banner.close);
   }
 
   Future<void> _decline(ConnectionRequest request) async {

@@ -121,6 +121,7 @@ class _HomeShellState extends State<HomeShell>
 
   @override
   void dispose() {
+    _bannerTimer?.cancel();
     _pagePos.removeListener(_syncRowSwipe);
     _pageAnim.dispose();
     _pagePos.dispose();
@@ -130,6 +131,9 @@ class _HomeShellState extends State<HomeShell>
     _discoverGrid.dispose();
     super.dispose();
   }
+
+  /// Deadline for the post-accept confirmation banner (see [_acceptRequest]).
+  Timer? _bannerTimer;
 
   /// Detaches the current snap-animation listener, if any. Called before
   /// every new animation and on drag start so a stopped/interrupted animation
@@ -230,7 +234,7 @@ class _HomeShellState extends State<HomeShell>
     await services.connection.accept(request);
     if (rootNavigator.canPop()) rootNavigator.pop();
     final stillNearby = services.engine.isNearby(request.peerSub);
-    messenger.showSnackBar(
+    final banner = messenger.showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 4),
         backgroundColor: AppColors.brandRed,
@@ -248,6 +252,13 @@ class _HomeShellState extends State<HomeShell>
             : null,
       ),
     );
+    // With an accessibility service active (assistants, password managers —
+    // near-universal on Samsung) Flutter ignores SnackBar durations entirely,
+    // and this confirmation was observed parked over the chat input for 13
+    // minutes. It is transient by design — close it after a hard deadline.
+    // Tracked so tests (and dispose) don't leak a pending timer.
+    _bannerTimer?.cancel();
+    _bannerTimer = Timer(const Duration(seconds: 8), banner.close);
   }
 
   Future<void> _declineRequest(ConnectionRequest request) =>

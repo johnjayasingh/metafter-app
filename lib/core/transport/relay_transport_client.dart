@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:amazon_cognito_identity_dart_2/sig_v4.dart';
+import 'package:flutter/foundation.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
@@ -171,8 +172,20 @@ class RelayTransportClient implements TransportClient {
   /// builds the SigV4 WSS URL and subscribes my inbox topic at QoS 1.
   Future<bool> _connectMqtt() async {
     final auth = CognitoAuthService.instance;
-    final creds = await auth.awsCredentials();
-    final sub = await auth.currentSub();
+    final AwsSessionCredentials? creds;
+    final String? sub;
+    try {
+      creds = await auth.awsCredentials();
+      sub = await auth.currentSub();
+    } catch (e) {
+      // A credentials fetch over a flaky network throws (SocketException via
+      // CognitoClientException) rather than returning null. Left uncaught it
+      // escaped the reconnect timer as an unhandled async exception and KILLED
+      // the backoff loop — the relay then stayed down for the rest of the
+      // session. Treat it like any other failed attempt.
+      debugPrint('RelayTransport: credentials fetch failed: $e');
+      return false;
+    }
     if (creds == null || sub == null) return false;
 
     final url = _signedWssUrl(creds);
@@ -217,7 +230,15 @@ class RelayTransportClient implements TransportClient {
     _reconnectTimer = Timer(delay, () async {
       _reconnectTimer = null;
       if (!_wantConnected) return;
-      final ok = await _connectMqtt();
+      // Nothing thrown here may escape: an unhandled exception ends the timer
+      // chain and the relay never reconnects for the rest of the session.
+      bool ok;
+      try {
+        ok = await _connectMqtt();
+      } catch (e) {
+        debugPrint('RelayTransport: reconnect attempt failed: $e');
+        ok = false;
+      }
       if (!_wantConnected) {
         _teardownMqtt();
         return;
@@ -225,7 +246,11 @@ class RelayTransportClient implements TransportClient {
       if (ok) {
         _reconnectAttempt = 0;
         // Catch up on envelopes deposited while the live channel was down.
-        await drainMailbox();
+        try {
+          await drainMailbox();
+        } catch (e) {
+          debugPrint('RelayTransport: mailbox drain failed: $e');
+        }
       } else {
         _scheduleReconnect();
       }
